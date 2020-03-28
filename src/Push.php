@@ -171,9 +171,9 @@ class Push implements EventEmitterInterface
         Instagram $instagram,
         LoggerInterface $logger = null)
     {
-        if (PHP_SAPI !== 'cli') {
-            throw new \RuntimeException('The Push client can only run from the command line.');
-        }
+        //if (PHP_SAPI !== 'cli') {
+        //    throw new \RuntimeException('The Push client can only run from the command line.');
+        //}
 
         $this->_instagram = $instagram;
         $this->_loop = $loop;

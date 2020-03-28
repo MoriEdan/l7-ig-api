@@ -385,14 +385,22 @@ class Request
     protected function _addDefaultHeaders()
     {
         if ($this->_defaultHeaders) {
+            $this->_headers['X-IG-Connection-Type'] = Constants::X_IG_Connection_Type;
+            $this->_headers['X-IG-Connection-Speed'] = $this->_parent->getConnectionSpeed();
+            $this->_headers['X-IG-Device-ID'] = $this->_parent->uuid;
+            $this->_headers['X-FB-HTTP-Engine'] = Constants::X_FB_HTTP_Engine;
+
+            $this->_headers['X-IG-App-Locale'] = $this->_parent->getLocale();
+            $this->_headers['X-IG-Device-Locale'] = $this->_parent->getLocale();
+            $this->_headers['X-IG-Android-ID'] = $this->_parent->device_id;
             $this->_headers['X-IG-App-ID'] = Constants::FACEBOOK_ANALYTICS_APPLICATION_ID;
             $this->_headers['X-IG-Capabilities'] = Constants::X_IG_Capabilities;
-            $this->_headers['X-IG-Connection-Type'] = Constants::X_IG_Connection_Type;
-            $this->_headers['X-IG-Connection-Speed'] = mt_rand(1000, 3700).'kbps';
-            // TODO: IMPLEMENT PROPER CALCULATION OF THESE HEADERS.
-            $this->_headers['X-IG-Bandwidth-Speed-KBPS'] = '-1.000';
-            $this->_headers['X-IG-Bandwidth-TotalBytes-B'] = '0';
-            $this->_headers['X-IG-Bandwidth-TotalTime-MS'] = '0';
+            $this->_headers['X-Bloks-Version-Id'] = Constants::BLOCK_VERSIONING_ID;
+            $this->_headers['X-IG-VP9-Capable'] = $this->_parent->getVP9Capable();
+            if ($this->_parent->getIsEUUser() === true) {
+                $this->_headers['X-IG-EU-DC-ENABLED'] = 'true';
+            }
+            $this->_headers['X-Bloks-Is-Layout-RTL'] = 'false';
         }
 
         return $this;
@@ -825,6 +833,9 @@ class Request
     public function getResponse(
         Response $responseObject)
     {
+        // Set this request as the most recently processed request
+        $this->_parent->client->setLastRequest($this); 
+        
         // Check for API response success and put its response in the object.
         $this->_parent->client->mapServerResponse( // Throws.
             $responseObject,
@@ -833,5 +844,15 @@ class Request
         );
 
         return $responseObject;
+    }
+
+    /**
+     * Returns the endpoint URL (absolute or relative) of this request.
+     *
+     * @return string
+     */
+    public function getUrl()
+    {
+        return $this->_url;
     }
 }

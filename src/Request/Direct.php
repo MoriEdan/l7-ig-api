@@ -48,8 +48,8 @@ class Direct extends RequestCollection
         }
         $request = $this->ig->request('direct_v2/inbox/')
             ->addParam('persistentBadging', 'true')
-            ->addParam('visual_message_return_type', 'unseen')
-            ->addParam('limit', $limit);
+            ->addParam('visual_message_return_type', 'unseen');
+//            ->addParam('limit', $limit);
         if ($cursorId !== null) {
             $request->addParam('cursor', $cursorId);
         }
@@ -501,7 +501,7 @@ class Direct extends RequestCollection
      *                           instead, provide "thread" with the thread ID.
      * @param string $text       Text message.
      * @param array  $options    An associative array of optional parameters, including:
-     *                           "client_context" - predefined UUID used to prevent double-posting.
+     *                           "client_context" and "mutation_token" - predefined UUID used to prevent double-posting.
      *
      * @throws \InvalidArgumentException
      * @throws \InstagramAPI\Exception\InstagramException
@@ -537,6 +537,44 @@ class Direct extends RequestCollection
     }
 
     /**
+     * Send reaction from a story media.
+     *
+     * @param array  $recipients An array with "users" or "thread" keys.
+     *                           To start a new thread, provide "users" as an array
+     *                           of numerical UserPK IDs. To use an existing thread
+     *                           instead, provide "thread" with the thread ID.
+     * @param string $reaction   The reaction.
+     * @param array  $options    An associative array of optional parameters, including:
+     *                           "client_context" and "mutation_token" - predefined UUID used to prevent double-posting.
+     * @param string $mediaId
+     *
+     * @throws \InvalidArgumentException
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\DirectSendItemResponse
+     */
+    public function sendStoryReaction(
+        array $recipients,
+        $reaction,
+        $mediaId,
+        $options = [])
+    {
+        // TODO: Add emoji checker on $reaction.
+
+        if ($mediaId === null) {
+            throw new \InvalidArgumentException('Media ID can not be null.');
+        }
+
+        /** @var Response\DirectSendItemResponse $result */
+        $result = $this->_sendDirectItem('reel_reaction', $recipients, array_merge($options, [
+            'reaction' => $reaction,
+            'media_id' => $mediaId,
+        ]));
+
+        return $result;
+    }
+
+    /**
      * Share an existing media post via direct message to a user's inbox.
      *
      * @param array  $recipients An array with "users" or "thread" keys.
@@ -546,7 +584,7 @@ class Direct extends RequestCollection
      * @param string $mediaId    The media ID in Instagram's internal format (ie "3482384834_43294").
      * @param array  $options    An associative array of additional parameters, including:
      *                           "media_type" (required) - either "photo" or "video";
-     *                           "client_context" (optional) - predefined UUID used to prevent double-posting;
+     *                           "client_context" and "mutation_token" (optional) - predefined UUID used to prevent double-posting;
      *                           "text" (optional) - text message.
      *
      * @throws \InvalidArgumentException
@@ -585,7 +623,7 @@ class Direct extends RequestCollection
      *                              instead, provide "thread" with the thread ID.
      * @param string $photoFilename The photo filename.
      * @param array  $options       An associative array of optional parameters, including:
-     *                              "client_context" - predefined UUID used to prevent double-posting.
+     *                              "client_context" and "mutation_token" - predefined UUID used to prevent double-posting.
      *
      * @throws \InvalidArgumentException
      * @throws \InstagramAPI\Exception\InstagramException
@@ -597,18 +635,76 @@ class Direct extends RequestCollection
         $photoFilename,
         array $options = [])
     {
-        if (!is_file($photoFilename) || !is_readable($photoFilename)) {
-            throw new \InvalidArgumentException(sprintf('File "%s" is not available for reading.', $photoFilename));
+        // Direct videos use different upload IDs.
+        $internalMetadata = new InternalMetadata(Utils::generateUploadId(true));
+        // Attempt to upload the video data.
+        $internalMetadata = $this->ig->internal->uploadSinglePhoto(Constants::FEED_DIRECT, $photoFilename, $internalMetadata);
+
+        // We must use the same client_context and mutation_token for all attempts to prevent double-posting.
+        if (!isset($options['client_context']) || !isset($options['mutation_token'])) {
+            $clientContext = Utils::generateClientContext();
+            $options['client_context'] = $clientContext;
+            $options['mutation_token'] = $clientContext;
         }
 
-        // validate width, height and aspect ratio of photo
-        $photoDetails = new PhotoDetails($photoFilename);
-        $photoDetails->validate(ConstraintsFactory::createFor(Constants::FEED_DIRECT));
+        // Send the uploaded photo to recipients.
+        try {
+            /** @var \InstagramAPI\Response\DirectSendItemResponse $result */
+            $result = $this->ig->internal->configureWithRetries(
+                function () use ($internalMetadata, $recipients, $options) {
+                    // Attempt to configure photo parameters (which sends it to the thread).
+                    return $this->_sendDirectItem('photo', $recipients, array_merge($options, [
+                        'upload_id'    => $internalMetadata->getUploadId(),
+                    ]));
+                }
+            );
+        } catch (InstagramException $e) {
+            // Pass Instagram's error as is.
+            throw $e;
+        } catch (\Exception $e) {
+            // Wrap runtime errors.
+            throw new UploadFailedException(
+                sprintf(
+                    'Upload of "%s" failed: %s',
+                    $internalMetadata->getPhotoDetails()->getBasename(),
+                    $e->getMessage()
+                ),
+                $e->getCode(),
+                $e
+            );
+        }
 
-        // uplaod it
-        return $this->_sendDirectItem('photo', $recipients, array_merge($options, [
-            'filepath' => $photoFilename,
-        ]));
+        return $result;
+    }
+
+    /**
+     * Send a permanent photo (upload) via direct message to a user's inbox.
+     *
+     * @param array  $recipients       An array with "users" or "thread" keys.
+     *                                 To start a new thread, provide "users" as an array
+     *                                 of numerical UserPK IDs. To use an existing thread
+     *                                 instead, provide "thread" with the thread ID.
+     * @param string $photoFilename    The photo filename.
+     * @param array  $externalMetadata (optional) User-provided metadata key-value pairs.
+     *
+     * @throws \InvalidArgumentException
+     * @throws \RuntimeException
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\ConfigureResponse
+     *
+     * @see Internal::configureSinglePhoto() for available metadata fields.
+     */
+    public function sendPermanentPhoto(
+        array $recipients,
+        $photoFilename,
+        array $externalMetadata = [])
+    {
+        $internalMetadata = new InternalMetadata();
+        $internalMetadata->setDirectRecipients($this->_prepareRecipients($recipients, true));
+        $internalMetadata->setStoryViewMode(Constants::STORY_VIEW_MODE_PERMANENT);
+
+        return $this->ig->internal->uploadSinglePhoto(Constants::FEED_DIRECT_STORY, $photoFilename, $internalMetadata, $externalMetadata);
     }
 
     /**
@@ -680,7 +776,7 @@ class Direct extends RequestCollection
      *                              instead, provide "thread" with the thread ID.
      * @param string $videoFilename The video filename.
      * @param array  $options       An associative array of optional parameters, including:
-     *                              "client_context" - predefined UUID used to prevent double-posting.
+     *                              "client_context" and "mutation_token" - predefined UUID used to prevent double-posting.
      *
      * @throws \InvalidArgumentException
      * @throws \RuntimeException
@@ -699,9 +795,11 @@ class Direct extends RequestCollection
         // Attempt to upload the video data.
         $internalMetadata = $this->ig->internal->uploadVideo(Constants::FEED_DIRECT, $videoFilename, $internalMetadata);
 
-        // We must use the same client_context for all attempts to prevent double-posting.
-        if (!isset($options['client_context'])) {
-            $options['client_context'] = Signatures::generateUUID(true);
+        // We must use the same client_context and mutation_token for all attempts to prevent double-posting.
+        if (!isset($options['client_context']) || !isset($options['mutation_token'])) {
+            $clientContext = Utils::generateClientContext();
+            $options['client_context'] = $clientContext;
+            $options['mutation_token'] = $clientContext;
         }
 
         // Send the uploaded video to recipients.
@@ -806,7 +904,7 @@ class Direct extends RequestCollection
      *                          of numerical UserPK IDs. To use an existing thread
      *                          instead, provide "thread" with the thread ID.
      * @param array $options    An associative array of optional parameters, including:
-     *                          "client_context" - predefined UUID used to prevent double-posting.
+     *                          "client_context" and "mutation_token" - predefined UUID used to prevent double-posting.
      *
      * @throws \InstagramAPI\Exception\InstagramException
      *
@@ -828,7 +926,7 @@ class Direct extends RequestCollection
      *                           instead, provide "thread" with the thread ID.
      * @param string $hashtag    Hashtag to share.
      * @param array  $options    An associative array of optional parameters, including:
-     *                           "client_context" - predefined UUID used to prevent double-posting;
+     *                           "client_context" and "mutation_token" - predefined UUID used to prevent double-posting;
      *                           "text" - text message.
      *
      * @throws \InvalidArgumentException
@@ -862,7 +960,7 @@ class Direct extends RequestCollection
      *                           instead, provide "thread" with the thread ID.
      * @param string $locationId Instagram's internal ID for the location.
      * @param array  $options    An associative array of optional parameters, including:
-     *                           "client_context" - predefined UUID used to prevent double-posting;
+     *                           "client_context" and "mutation_token" - predefined UUID used to prevent double-posting;
      *                           "text" - text message.
      *
      * @throws \InvalidArgumentException
@@ -895,7 +993,7 @@ class Direct extends RequestCollection
      *                           instead, provide "thread" with the thread ID.
      * @param string $userId     Numerical UserPK ID.
      * @param array  $options    An associative array of optional parameters, including:
-     *                           "client_context" - predefined UUID used to prevent double-posting;
+     *                           "client_context" and "mutation_token" - predefined UUID used to prevent double-posting;
      *                           "text" - text message.
      *
      * @throws \InvalidArgumentException
@@ -924,7 +1022,7 @@ class Direct extends RequestCollection
      * @param string $threadItemId ThreadItemIdentifier.
      * @param string $reactionType One of: "like".
      * @param array  $options      An associative array of optional parameters, including:
-     *                             "client_context" - predefined UUID used to prevent double-posting.
+     *                             "client_context" and "mutation_token" - predefined UUID used to prevent double-posting.
      *
      * @throws \InvalidArgumentException
      * @throws \InstagramAPI\Exception\InstagramException
@@ -954,7 +1052,7 @@ class Direct extends RequestCollection
      * @param string $reelId     The reel ID in Instagram's internal format (ie "highlight:12970012453081168")
      * @param array  $options    An associative array of additional parameters, including:
      *                           "media_type" (required) - either "photo" or "video";
-     *                           "client_context" - predefined UUID used to prevent double-posting;
+     *                           "client_context" and "mutation_token" - predefined UUID used to prevent double-posting;
      *                           "text" - text message.
      *
      * @throws \InvalidArgumentException
@@ -1006,7 +1104,7 @@ class Direct extends RequestCollection
      *                            instead, provide "thread" with the thread ID.
      * @param string $broadcastId The broadcast ID in Instagram's internal format (ie "17854587811139572").
      * @param array  $options     An associative array of optional parameters, including:
-     *                            "client_context" - predefined UUID used to prevent double-posting.
+     *                            "client_context" and "mutation_token" - predefined UUID used to prevent double-posting.
      *
      * @throws \InvalidArgumentException
      * @throws \InstagramAPI\Exception\InstagramException
@@ -1030,7 +1128,7 @@ class Direct extends RequestCollection
      * @param string $threadItemId ThreadItemIdentifier.
      * @param string $reactionType One of: "like".
      * @param array  $options      An associative array of optional parameters, including:
-     *                             "client_context" - predefined UUID used to prevent double-posting.
+     *                             "client_context" and "mutation_token" - predefined UUID used to prevent double-posting.
      *
      * @throws \InvalidArgumentException
      * @throws \InstagramAPI\Exception\InstagramException
@@ -1225,15 +1323,15 @@ class Direct extends RequestCollection
      *                           of numerical UserPK IDs. To use an existing thread
      *                           instead, provide "thread" with the thread ID.
      * @param array  $options    Depends on $type:
-     *                           "message" uses "client_context" and "text";
-     *                           "like" uses "client_context";
-     *                           "hashtag" uses "client_context", "hashtag" and "text";
-     *                           "location" uses "client_context", "venue_id" and "text";
-     *                           "profile" uses "client_context", "profile_user_id" and "text";
-     *                           "photo" uses "client_context" and "filepath";
-     *                           "video" uses "client_context", "upload_id" and "video_result";
-     *                           "links" uses "client_context", "link_text" and "link_urls".
-     *                           "live" uses "client_context" and "text".
+     *                           "message" uses "client_context", "mutation_token" and "text";
+     *                           "like" uses "client_context" and "mutation_token";
+     *                           "hashtag" uses "client_context", "mutation_token", "hashtag" and "text";
+     *                           "location" uses "client_context", "mutation_token", "venue_id" and "text";
+     *                           "profile" uses "client_context", "mutation_token", "profile_user_id" and "text";
+     *                           "photo" uses "client_context", "mutation_token" and "filepath";
+     *                           "video" uses "client_context", "mutation_token", "upload_id" and "video_result";
+     *                           "links" uses "client_context", "mutation_token", "link_text" and "link_urls".
+     *                           "live" uses "client_context", "mutation_token" and "text".
      *
      * @throws \InvalidArgumentException
      * @throws \InstagramAPI\Exception\InstagramException
@@ -1245,6 +1343,8 @@ class Direct extends RequestCollection
         array $recipients,
         array $options = [])
     {
+        $recipients = $this->_prepareRecipients($recipients, false);
+
         // Most requests are unsigned, but some use signing by overriding this.
         $signedPost = false;
 
@@ -1255,6 +1355,11 @@ class Direct extends RequestCollection
                 // Check and set text.
                 if (!isset($options['text'])) {
                     throw new \InvalidArgumentException('No text message provided.');
+                }
+                if (!isset($options['mentioned_users_id'])) {
+                    $request->addPost('mentioned_users_id', json_encode([]));
+                } else {
+                    $request->addPost('mentioned_users_id', $options['mentioned_users_id']);
                 }
                 $request->addPost('text', $options['text']);
                 break;
@@ -1298,12 +1403,12 @@ class Direct extends RequestCollection
                 }
                 break;
             case 'photo':
-                $request = $this->ig->request('direct_v2/threads/broadcast/upload_photo/');
-                // Check and set filepath.
-                if (!isset($options['filepath'])) {
-                    throw new \InvalidArgumentException('No filepath provided.');
+                $request = $this->ig->request('direct_v2/threads/broadcast/configure_photo/');
+                // Check and set upload_id.
+                if (!isset($options['upload_id'])) {
+                    throw new \InvalidArgumentException('No upload_id provided.');
                 }
-                $request->addFile('photo', $options['filepath'], 'direct_temp_photo_'.Utils::generateUploadId().'.jpg');
+                $request->addPost('upload_id', $options['upload_id']);
                 break;
             case 'video':
                 $request = $this->ig->request('direct_v2/threads/broadcast/configure_video/');
@@ -1365,12 +1470,23 @@ class Direct extends RequestCollection
                     $request->addPost('text', $options['text']);
                 }
                 break;
+            case 'reel_reaction':
+                $request = $this->ig->request('direct_v2/threads/broadcast/reel_react/')
+                    ->addPost('media_id', $options['media_id']);
+
+                $request->addPost('text', $options['reaction']);
+                $request->addPost('reaction_emoji', $options['reaction']);
+
+                // Set reel_id which is just the user id
+                if (isset($recipients['users'])) {
+                    $request->addPost('reel_id', $recipients['users'][0]);
+                }
+                break;
             default:
                 throw new \InvalidArgumentException('Unsupported _sendDirectItem() type.');
         }
 
         // Add recipients.
-        $recipients = $this->_prepareRecipients($recipients, false);
         if (isset($recipients['users'])) {
             $request->addPost('recipient_users', $recipients['users']);
         } elseif (isset($recipients['thread'])) {
@@ -1380,12 +1496,13 @@ class Direct extends RequestCollection
         }
 
         // Handle client_context.
-        if (!isset($options['client_context'])) {
+        if (!isset($options['client_context']) || !isset($options['mutation_token']) || !isset($options['offline_threading_id'])) {
             // WARNING: Must be random every time otherwise we can only
             // make a single post per direct-discussion thread.
-            $options['client_context'] = Signatures::generateUUID(true);
-        } elseif (!Signatures::isValidUUID($options['client_context'])) {
-            throw new \InvalidArgumentException(sprintf('"%s" is not a valid UUID.', $options['client_context']));
+            $clientContext = Utils::generateClientContext();
+            $options['client_context'] = $clientContext;
+            $options['mutation_token'] = $clientContext;
+            $options['offline_threading_id'] = $clientContext;
         }
 
         // Add some additional data if signed post.
@@ -1397,8 +1514,11 @@ class Direct extends RequestCollection
         return $request->setSignedPost($signedPost)
             ->addPost('action', 'send_item')
             ->addPost('client_context', $options['client_context'])
+            ->addPost('mutation_token', $options['mutation_token'])
+            ->addPost('offline_threading_id', $options['offline_threading_id'])
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('_uuid', $this->ig->uuid)
+            ->addPost('device_id', $this->ig->device_id)
             ->getResponse(new Response\DirectSendItemResponse());
     }
 
@@ -1411,8 +1531,8 @@ class Direct extends RequestCollection
      *                           of numerical UserPK IDs. To use an existing thread
      *                           instead, provide "thread" with the thread ID.
      * @param array  $options    Depends on $type:
-     *                           "media_share" uses "client_context", "media_id", "media_type" and "text";
-     *                           "story_share" uses "client_context", "story_media_id", "media_type" and "text".
+     *                           "media_share" uses "client_context", "mutation_token, ""media_id", "media_type" and "text";
+     *                           "story_share" uses "client_context", "mutation_token", "story_media_id", "media_type" and "text".
      *
      * @throws \InvalidArgumentException
      * @throws \InstagramAPI\Exception\InstagramException
@@ -1455,7 +1575,7 @@ class Direct extends RequestCollection
                     throw new \InvalidArgumentException('No story_media_id provided.');
                 }
                 $request->addPost('story_media_id', $options['story_media_id']);
-                // Set text if provided.
+                // Set reel_id if provided.
                 if (isset($options['reel_id'])) {
                     $request->addPost('reel_id', $options['reel_id']);
                 }
@@ -1484,13 +1604,14 @@ class Direct extends RequestCollection
             throw new \InvalidArgumentException('Please provide at least one recipient.');
         }
 
-        // Handle client_context.
-        if (!isset($options['client_context'])) {
+        // Handle client_context and mutation_token.
+        if (!isset($options['client_context']) || !isset($options['mutation_token']) || !isset($options['offline_threading_id'])) {
             // WARNING: Must be random every time otherwise we can only
             // make a single post per direct-discussion thread.
-            $options['client_context'] = Signatures::generateUUID(true);
-        } elseif (!Signatures::isValidUUID($options['client_context'])) {
-            throw new \InvalidArgumentException(sprintf('"%s" is not a valid UUID.', $options['client_context']));
+            $clientContext = Utils::generateClientContext();
+            $options['client_context'] = $clientContext;
+            $options['mutation_token'] = $clientContext;
+            $options['offline_threading_id'] = $clientContext;
         }
 
         // Add some additional data if signed post.
@@ -1503,6 +1624,8 @@ class Direct extends RequestCollection
             ->addPost('action', 'send_item')
             ->addPost('unified_broadcast_format', '1')
             ->addPost('client_context', $options['client_context'])
+            ->addPost('mutation_token', $options['mutation_token'])
+            ->addPost('offline_threading_id', $options['offline_threading_id'])
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('_uuid', $this->ig->uuid)
             ->getResponse(new Response\DirectSendItemsResponse());
@@ -1516,7 +1639,7 @@ class Direct extends RequestCollection
      * @param string $reactionType   One of: "like".
      * @param string $reactionStatus One of: "created", "deleted".
      * @param array  $options        An associative array of optional parameters, including:
-     *                               "client_context" - predefined UUID used to prevent double-posting.
+     *                               "client_context" and "mutation_token" - predefined UUID used to prevent double-posting.
      *
      * @throws \InvalidArgumentException
      * @throws \InstagramAPI\Exception\InstagramException

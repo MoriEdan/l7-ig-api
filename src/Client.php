@@ -18,15 +18,6 @@ use Psr\Http\Message\ResponseInterface as HttpResponseInterface;
 
 /**
  * This class handles core API network communication.
- *
- * WARNING TO CONTRIBUTORS: This class is a wrapper for the HTTP client, and
- * handles raw networking, cookies, HTTP requests and responses. Don't put
- * anything related to high level API functions (such as file uploads) here.
- * Most of the higher level code belongs in either the Request class or in the
- * individual endpoint functions.
- *
- * @author mgp25: Founder, Reversing, Project Leader (https://github.com/mgp25)
- * @author SteveJobzniak (https://github.com/SteveJobzniak)
  */
 class Client
 {
@@ -119,6 +110,72 @@ class Client
     private $_resetConnection;
 
     /**
+     * The most recent request processed.
+     *
+     * Used for debugging failed requests in exceptions without needing to
+     * enable debug mode.
+     *
+     * @var Request
+     */
+    private $_lastRequest;
+
+    /**
+     * The flag will use same pigeon Timestamp.
+     *
+     * @var bool
+     */
+    private $_pigeonBatch;
+
+    /**
+     * The Pigeon Timestamp.
+     *
+     * @var float
+     */
+    private $_pigeonTimestamp;
+
+    /**
+     * The Pigeon Session ID.
+     *
+     * @var string
+     */
+    private $_pigeonSession;
+
+    /**
+     * Total time elapsed.
+     *
+     * @var string
+     */
+    private $_totalTime = 0;
+
+    /**
+     * Total Bytes received.
+     *
+     * @var string
+     */
+    private $_totalBytes = 0;
+
+    /**
+     * Bytes received in the latest response.
+     *
+     * @var string
+     */
+    private $_bandwidthB = 0;
+
+    /**
+     * Time elapsed in the latest response.
+     *
+     * @var string
+     */
+    private $_bandwidthM = 0;
+
+    /**
+     * IG WWW Claim.
+     *
+     * @var string
+     */
+    private $_wwwClaim = '';
+
+    /**
      * Constructor.
      *
      * @param \InstagramAPI\Instagram $parent
@@ -131,6 +188,9 @@ class Client
         // Defaults.
         $this->_verifySSL = true;
         $this->_proxy = null;
+
+        // Set Pigeon Session ID.
+        $this->_pigeonSession = Signatures::generateUUID();
 
         // Create a default handler stack with Guzzle's auto-selected "best
         // possible transfer handler for the user's system", and with all of
@@ -227,6 +287,16 @@ class Client
     }
 
     /**
+     * Retrieve Pigeon Session ID.
+     *
+     * @return string
+     */
+    public function getPigeonSession()
+    {
+        return $this->_pigeonSession;
+    }
+
+    /**
      * Retrieve the CSRF token from the current cookie jar.
      *
      * Note that Instagram gives you a 1-year token expiration timestamp when
@@ -245,6 +315,22 @@ class Client
 
         return $cookie->getValue();
     }
+
+    /**
+     * Retrieve the MID token from the current cookie jar.
+     *
+     * @return string|null The MID if found and non-expired, otherwise NULL.
+     */
+    public function getMid()
+    {
+        $cookie = $this->getCookie('mid', 'i.instagram.com');
+        if ($cookie === null || $cookie->getValue() === '') {
+            return null;
+        }
+
+        return $cookie->getValue();
+    }
+
 
     /**
      * Searches for a specific cookie in the current jar.
@@ -564,7 +650,7 @@ class Client
         // NOTE: It will contain the full server response object too, which
         // means that the user can look at the full response details via the
         // exception itself.
-        if (!$responseObject->isOk()) {
+        if (!$responseObject->isOk() || $responseObject->hasStepName()) {
             if ($responseObject instanceof \InstagramAPI\Response\DirectSendItemResponse && $responseObject->getPayload() !== null) {
                 $message = $responseObject->getPayload()->getMessage();
             } else {
@@ -782,28 +868,63 @@ class Client
         HttpRequestInterface $request,
         array $guzzleOptions = [])
     {
-        // Set up headers that are required for every request.
-        $request = modify_request($request, [
+        $headers = [
             'set_headers' => [
-                'User-Agent'       => $this->_userAgent,
+                'X-Pigeon-Session-Id'    => $this->_pigeonSession,
+                'X-Pigeon-Rawclienttime' => $this->_getPigeonRawClientTime(),
                 // Keep the API's HTTPS connection alive in Guzzle for future
                 // re-use, to greatly speed up all further queries after this.
                 'Connection'       => 'Keep-Alive',
-                'Accept'           => '*/*',
                 'Accept-Encoding'  => Constants::ACCEPT_ENCODING,
-                'Accept-Language'  => Constants::ACCEPT_LANGUAGE,
+                'Accept-Language'  => $this->_parent->getAcceptLanguage(),
             ],
-        ]);
+        ];
 
+        if ($this->_totalTime !== 0) {
+            $headers['set_headers']['X-IG-Bandwidth-Speed-KBPS'] = ($this->_totalBytes / $this->_totalTime + $this->_bandwidthB / $this->_bandwidthM) / 2;
+        } else {
+            $headers['set_headers']['X-IG-Bandwidth-Speed-KBPS'] = '-1.000';
+        }
+
+        if ($this->_wwwClaim !== '') {
+            $headers['set_headers']['X-IG-WWW-Claim'] = $this->_wwwClaim;
+        }
+
+        $headers['set_headers']['X-IG-Bandwidth-TotalBytes-B'] = $this->_totalBytes;
+        $headers['set_headers']['X-IG-Bandwidth-TotalTime-MS'] = $this->_totalTime;
+
+        $userAgent = $request->getHeader('User-Agent');
+
+        if (!empty($userAgent)) {
+            $headers['set_headers']['User-Agent'] = $userAgent;
+        } else {
+            $headers['set_headers']['User-Agent'] = $this->_userAgent;
+        }
+
+        // Set up headers that are required for every request.
+        $request = modify_request($request, $headers);
+        
         // Check the Content-Type header for debugging.
         $contentType = $request->getHeader('Content-Type');
         $isFormData = count($contentType) && reset($contentType) === Constants::CONTENT_TYPE;
+
+        $start = microtime(true);
 
         // Perform the API request.
         $response = $this->_apiRequest($request, $guzzleOptions, [
             'debugUploadedBody'  => $isFormData,
             'debugUploadedBytes' => !$isFormData,
         ]);
+
+        $this->_wwwClaim = $response->getHeaderLine('x-ig-set-www-claim');
+
+        $this->_bandwidthM = ceil(1000 * (microtime(true) - $start));
+        $this->_bandwidthB = (int)($response->getHeaderLine('Content-Length'));
+
+        if ($this->_bandwidthB >= 50000 && $this->_bandwidthM >= 50) {
+            $this->_totalTime += $this->_bandwidthM;
+            $this->_totalBytes += $this->_bandwidthB;
+        }
 
         return $response;
     }
@@ -846,5 +967,61 @@ class Client
     public function zeroRating()
     {
         return $this->_zeroRating;
+    }
+
+    /**
+     * Start Pigeon batch requests.
+     */
+    public function startEmulatingBatch()
+    {
+        $this->_pigeonBatch = true;
+        $this->_pigeonTimestamp = microtime(true);
+    }
+
+    /**
+     * Stop Pigeon batch requests.
+     */
+    public function stopEmulatingBatch()
+    {
+        $this->_pigeonBatch = false;
+        $this->_pigeonTimestamp = null;
+    }
+
+    /**
+     * Get Pigeon Client time.
+     *
+     * @return string
+     */
+    private function _getPigeonRawClientTime()
+    {
+        if ($this->_pigeonBatch === true) {
+            $result = $this->_pigeonTimestamp;
+            $this->_pigeonTimestamp += mt_rand(0, 100) / 1000;
+        } else {
+            $result = microtime(true);
+        }
+
+        return sprintf('%.3F', $result);
+    }
+
+    /**
+     * Sets the last processed request.
+     *
+     * @param Request $endpoint The last processed request
+     */
+    public function setLastRequest(
+        $endpoint)
+    {
+        $this->_lastRequest = $endpoint;
+    }
+    
+    /**
+     * Gets the last processed point.
+     *
+     * @return Request
+     */
+    public function getLastRequest()
+    {
+        return $this->_lastRequest;
     }
 }

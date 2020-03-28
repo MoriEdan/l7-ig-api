@@ -32,8 +32,10 @@ class StorageHandler
         'phone_id', // Hardware identifier.
         'uuid', // Universally unique identifier.
         'advertising_id', // Google Play advertising ID.
+        'fb_tracking_id', // Facebook Tracking ID.
         'session_id', // The user's current application session ID.
         'experiments', // Interesting experiment variables for this account.
+        'fb_access_token', // Facebook access token for alternative login method.
         'fbns_auth', // Serialized auth credentials for FBNS.
         'fbns_token', // Serialized FBNS token.
         'last_fbns_token', // Tracks time elapsed since our last FBNS token refresh.
@@ -44,6 +46,9 @@ class StorageHandler
         'zr_token', // Zero rating token.
         'zr_expires', // Zero rating token expiration timestamp.
         'zr_rules', // Zero rating rewrite rules.
+        'banner_token', // Used for IGTV requests.
+        'public_key', // Public Key for login authentication.
+        'public_key_id' // Public Key ID for login authentication.
     ];
 
     /**

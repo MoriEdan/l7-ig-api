@@ -439,6 +439,7 @@ class Account extends RequestCollection
     public function getSecurityInfo()
     {
         return $this->ig->request('accounts/account_security_info/')
+            ->addPost('device_id', $this->ig->device_id)
             ->addPost('_uuid', $this->ig->uuid)
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_csrftoken', $this->ig->client->getToken())
@@ -483,6 +484,7 @@ class Account extends RequestCollection
      *
      * @param string $phoneNumber      Phone number with country code. Format: +34123456789.
      * @param string $verificationCode The code sent to your phone via `Account::sendTwoFactorEnableSMS()`.
+     * @param bool   $trustDevice      If you want to trust the used Device ID.
      *
      * @throws \InstagramAPI\Exception\InstagramException
      *
@@ -493,11 +495,13 @@ class Account extends RequestCollection
      */
     public function enableTwoFactorSMS(
         $phoneNumber,
-        $verificationCode)
+        $verificationCode,
+        $trustDevice = false)
     {
         $cleanNumber = '+'.preg_replace('/[^0-9]/', '', $phoneNumber);
 
         $this->ig->request('accounts/enable_sms_two_factor/')
+            ->addPost('trust_this_device', ($trustDevice) ? '1' : '0')
             ->addPost('_uuid', $this->ig->uuid)
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_csrftoken', $this->ig->client->getToken())
@@ -743,8 +747,10 @@ class Account extends RequestCollection
         return $this->ig->request('accounts/get_prefill_candidates/')
             ->setNeedsAuth(false)
             ->addPost('android_device_id', $this->ig->device_id)
-            ->addPost('device_id', $this->ig->uuid)
+            ->addPost('phone_id', $this->ig->phone_id)
             ->addPost('usages', '["account_recovery_omnibox"]')
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->addPost('device_id', $this->ig->uuid)
             ->getResponse(new Response\PrefillCandidatesResponse());
     }
 

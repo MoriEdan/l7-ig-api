@@ -257,7 +257,7 @@ class People extends RequestCollection
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('user_id', $userId)
-            ->addPost('radio_type', 'wifi-none')
+            ->addPost('radio_type', $this->ig->radio_type)
             ->getResponse(new Response\FriendshipResponse());
     }
 
@@ -281,7 +281,7 @@ class People extends RequestCollection
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('user_id', $userId)
-            ->addPost('radio_type', 'wifi-none')
+            ->addPost('radio_type', $this->ig->radio_type)
             ->getResponse(new Response\FriendshipResponse());
     }
 
@@ -302,7 +302,7 @@ class People extends RequestCollection
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('user_id', $userId)
-            ->addPost('radio_type', 'wifi-none')
+            ->addPost('radio_type', $this->ig->radio_type)
             ->getResponse(new Response\FriendshipResponse());
     }
 
@@ -333,6 +333,8 @@ class People extends RequestCollection
      * @param string      $rankToken   The list UUID. You must use the same value for all pages of the list.
      * @param string|null $searchQuery Limit the userlist to ones matching the query.
      * @param string|null $maxId       Next "maximum ID", used for pagination.
+     * @param string|null $order       Search order. Latest followings: 'date_followed_earliest',
+     *                                 earliest followings: 'date_followed_earliest'.
      *
      * @throws \InvalidArgumentException
      * @throws \InstagramAPI\Exception\InstagramException
@@ -346,12 +348,21 @@ class People extends RequestCollection
         $userId,
         $rankToken,
         $searchQuery = null,
-        $maxId = null)
+        $maxId = null,
+        $order = null)
     {
         Utils::throwIfInvalidRankToken($rankToken);
         $request = $this->ig->request("friendships/{$userId}/following/")
             ->addParam('includes_hashtags', true)
-            ->addParam('rank_token', $rankToken);
+            ->addParam('rank_token', $rankToken)
+            ->addParam('rank_mutual', 0)
+            ->addParam('target_id', $userId);
+        if ($order !== null) {
+            if ($order !== 'date_followed_earliest' && $order !== 'date_followed_latest') {
+                throw new \InvalidArgumentException('Invalid order type.');
+            }
+            $request->addParam('order', $order);
+        }
         if ($searchQuery !== null) {
             $request->addParam('query', $searchQuery);
         }
@@ -398,11 +409,87 @@ class People extends RequestCollection
     }
 
     /**
+     * Get list of who a user is followed with web API
+     *
+     * @param string      $userId        Numerical UserPK ID.
+     * @param int         $next_page     Limit the userlist.
+     * @param string|null $end_cursor    Next "maximum ID", used for pagination.
+     * @param bool        $include_reel  Include stories reels in response
+     *
+     * @throws \InvalidArgumentException
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GraphqlResponse
+     */
+    public function getFollowersGraph(
+        $userId,
+        $next_page = 50,
+        $end_cursor = null,
+        $include_reel = false)
+    {
+        if ($userId == null) {
+            throw new \InvalidArgumentException('Empty $userId sent to getFollowersGraph() function.');
+        }
+
+        return $request = $this->ig->request("graphql/query/")
+            ->setVersion(5)
+            ->setSignedPost(false)
+            ->addParam('query_hash', 'c76146de99bb02f6415203be841dd25a')
+            ->addParam('variables', json_encode([
+                "id" => $userId,
+                "include_reel" => $include_reel ? true : false,
+                "fetch_mutual" => false,
+                "first" => $next_page,
+                "after" => $end_cursor,
+            ]))
+            ->getResponse(new Response\GraphqlResponse());
+    }
+
+    /**
+     * Get list of who a user is followed with web API (v2, just name changed for compatibility)
+     *
+     * @param string      $userId        Numerical UserPK ID.
+     * @param int         $next_page     Limit the userlist.
+     * @param string|null $end_cursor    Next "maximum ID", used for pagination.
+     * @param bool        $include_reel  Include stories reels in response
+     *
+     * @throws \InvalidArgumentException
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GraphqlResponse
+     */
+    public function getFollowerWeb(
+        $userId,
+        $next_page = null,
+        $end_cursor = null,
+        $include_reel = false)
+    {
+        if ($userId == null) {
+            throw new \InvalidArgumentException('Empty $userId sent to getFollowersGraph() function.');
+        }
+
+        return $request = $this->ig->request("graphql/query/")
+            ->setVersion(5)
+            ->setSignedPost(false)
+            ->addParam('query_hash', 'c76146de99bb02f6415203be841dd25a')
+            ->addParam('variables', json_encode([
+                "id" => $userId,
+                "include_reel" => $include_reel ? true : false,
+                "fetch_mutual" => false,
+                "first" => ($next_page !== null) ? $next_page : 50,
+                "after" => $end_cursor,
+            ]))
+            ->getResponse(new Response\GraphqlResponse());
+    }
+
+    /**
      * Get list of who you are following.
      *
      * @param string      $rankToken   The list UUID. You must use the same value for all pages of the list.
      * @param string|null $searchQuery Limit the userlist to ones matching the query.
      * @param string|null $maxId       Next "maximum ID", used for pagination.
+     * @param string|null $order       Search order. Latest followings: 'date_followed_earliest',
+     *                                 earliest followings: 'date_followed_earliest'.
      *
      * @throws \InstagramAPI\Exception\InstagramException
      *
@@ -414,9 +501,10 @@ class People extends RequestCollection
     public function getSelfFollowing(
         $rankToken,
         $searchQuery = null,
-        $maxId = null)
+        $maxId = null,
+        $order = null)
     {
-        return $this->getFollowing($this->ig->account_id, $rankToken, $searchQuery, $maxId);
+        return $this->getFollowing($this->ig->account_id, $rankToken, $searchQuery, $maxId, $order);
     }
 
     /**
@@ -657,6 +745,9 @@ class People extends RequestCollection
     public function unlinkAddressBook()
     {
         return $this->ig->request('address_book/unlink/')
+            ->addPost('user_initiated', 'true')
+            ->addPost('phone_id', $this->ig->phone_id)
+            ->addPost('device_id', $this->ig->device_id)
             ->addPost('_uuid', $this->ig->uuid)
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_csrftoken', $this->ig->client->getToken())
@@ -713,6 +804,8 @@ class People extends RequestCollection
     /**
      * Get suggested users via account badge.
      *
+     * @param string $module (optional) From which app module (page) accesed.
+     *
      * This is the endpoint for when you press the "user icon with the plus
      * sign" on your own profile in the Instagram app. Its amount of suggestions
      * matches the number on the badge, and it usually only has a handful (1-4).
@@ -721,12 +814,13 @@ class People extends RequestCollection
      *
      * @return \InstagramAPI\Response\SuggestedUsersBadgeResponse
      */
-    public function getSuggestedUsersBadge()
+    public function getSuggestedUsersBadge(
+        $module = 'discover_people')
     {
         return $this->ig->request('discover/profile_su_badge/')
             ->addPost('_uuid', $this->ig->uuid)
             ->addPost('_csrftoken', $this->ig->client->getToken())
-            ->addPost('module', 'discover_people')
+            ->addPost('module', $module)
             ->getResponse(new Response\SuggestedUsersBadgeResponse());
     }
 
@@ -790,7 +884,7 @@ class People extends RequestCollection
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('user_id', $userId)
-            ->addPost('radio_type', 'wifi-none')
+            ->addPost('radio_type', $this->ig->radio_type)
             ->addPost('device_id', $this->ig->device_id);
 
         if ($mediaId !== null) {
@@ -819,13 +913,268 @@ class People extends RequestCollection
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('user_id', $userId)
-            ->addPost('radio_type', 'wifi-none');
+            ->addPost('radio_type', $this->ig->radio_type);
 
         if ($mediaId !== null) {
             $request->addPost('media_id_attribution', $mediaId);
         }
 
         return $request->getResponse(new Response\FriendshipResponse());
+    }
+
+    /**
+     * Like the media with web API
+     *
+     * @param string      $mediaId        Numerical Media ID.
+     *
+     * @throws \InvalidArgumentException
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GraphqlResponse
+     */
+    public function likeWeb(
+        $mediaId)
+    {
+        if ($mediaId == null) {
+            throw new \InvalidArgumentException('Empty $mediaId sent to getFollowersGraph() function.');
+        }
+
+        $csrftoken  = $this->ig->client->getToken();
+        $mid        = $this->ig->client->getCookie('csrftoken', 'i.instagram.com')->getValue();
+        $ds_user_id = $this->ig->client->getCookie('ds_user_id', 'i.instagram.com')->getValue();
+        $sessionid  = $this->ig->client->getCookie('sessionid', 'i.instagram.com')->getValue();
+        $urlgen     = $this->ig->client->getCookie('urlgen', 'i.instagram.com')->getValue();
+        $rur        = $this->ig->client->getCookie('rur', 'i.instagram.com')->getValue();
+        $proxy      = $this->ig->client->getProxy();
+
+        $curl = curl_init();
+
+        curl_setopt_array($curl, [
+            CURLOPT_URL            => "https://instagram.com/web/likes/{$mediaId}/like/",
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING       => "gzip, deflate, br",
+            CURLOPT_MAXREDIRS      => 10,
+            CURLOPT_TIMEOUT        => 0,
+            CURLOPT_USERAGENT      => "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36",
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST  => "POST",
+            CURLOPT_POSTFIELDS     => [
+                'mediaid'      => $mediaId
+                
+            ],
+            CURLOPT_HTTPHEADER     => [
+                "referrer: https://www.instagram.com/p/$mediaId",
+                "x-ig-app-id: 936619743392459",
+                "x-instagram-ajax: f9e28d162740",
+                "sec-fetch-site: same-origin",
+                "sec-fetch-mode: cors",
+                "sec-fetch-dest: empty",
+                "accept: */*",
+                "accept-encoding: gzip, deflate, br",
+                "x-ig-www-claim: hmac.AR3VWu1WbtgZTYm1LI-JdffO71nek5ezN2CM-bQ6iN6n1Dka",
+                "x-requested-with: XMLHttpRequest",
+                "x-csrftoken: " . $csrftoken,
+                "Content-Type: application/x-www-form-urlencoded",
+                "Cookie: mid=".$mid."; ds_user_id=$ds_user_id; csrftoken=$csrftoken; sessionid=$sessionid; rur=$rur; urlgen=$urlgen"
+            ],
+        ]);
+        
+        if ($proxy) {
+            $proxyStruct  = explode('://', $proxy);
+            $httpS        = $proxyStruct[0] . "://";
+            $proxyStruct  = explode('@', $proxyStruct[1]);
+        
+            if (isset($proxyStruct[1])) {
+                $proxyAuth    = $proxyStruct[0];
+                $proxyAddress = $httpS . $proxyStruct[1];
+            } else {
+                $proxyAuth    = false;
+                $proxyAddress = $httpS . $proxyStruct[0];
+            }
+
+            curl_setopt($curl, CURLOPT_PROXY, $proxyAddress);
+
+            if ($proxyAuth) {
+                curl_setopt($curl, CURLOPT_PROXYUSERPWD, $proxyAuth);
+            }
+        }
+
+        $response = curl_exec($curl);
+
+        curl_close($curl);
+
+        return $response;
+    }
+
+    /**
+     * Follow user with web API
+     *
+     * @param string       $userId       Numerical User PK ID.
+     *
+     * @throws \InvalidArgumentException
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GraphqlResponse
+     */
+    public function followWeb(
+        $userId)
+    {
+        if ($userId == null) {
+            throw new \InvalidArgumentException('Empty $userId sent to getFollowersGraph() function.');
+        }
+
+        $csrftoken  = $this->ig->client->getToken();
+        $mid        = $this->ig->client->getCookie('csrftoken', 'i.instagram.com')->getValue();
+        $ds_user_id = $this->ig->client->getCookie('ds_user_id', 'i.instagram.com')->getValue();
+        $sessionid  = $this->ig->client->getCookie('sessionid', 'i.instagram.com')->getValue();
+        $urlgen     = $this->ig->client->getCookie('urlgen', 'i.instagram.com')->getValue();
+        $rur        = $this->ig->client->getCookie('rur', 'i.instagram.com')->getValue();
+        $proxy      = $this->ig->client->getProxy();
+
+        $curl = curl_init();
+
+        curl_setopt_array($curl, [
+            CURLOPT_URL            => "https://instagram.com/web/friendships/{$userId}/follow/",
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING       => "gzip, deflate, br",
+            CURLOPT_MAXREDIRS      => 10,
+            CURLOPT_TIMEOUT        => 0,
+            CURLOPT_USERAGENT      => "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36",
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST  => "POST",
+            CURLOPT_POSTFIELDS     => [
+                'userid'      => $userId
+                
+            ],
+            CURLOPT_HTTPHEADER     => [
+                "referrer: https://www.instagram.com/",
+                "x-ig-app-id: 936619743392459",
+                "x-instagram-ajax: f9e28d162740",
+                "sec-fetch-site: same-origin",
+                "sec-fetch-mode: cors",
+                "sec-fetch-dest: empty",
+                "accept: */*",
+                "accept-encoding: gzip, deflate, br",
+                "x-ig-www-claim: hmac.AR3VWu1WbtgZTYm1LI-JdffO71nek5ezN2CM-bQ6iN6n1Dka",
+                "x-requested-with: XMLHttpRequest",
+                "x-csrftoken: " . $csrftoken,
+                "Content-Type: application/x-www-form-urlencoded",
+                "Cookie: mid=".$mid."; ds_user_id=$ds_user_id; csrftoken=$csrftoken; sessionid=$sessionid; rur=$rur; urlgen=$urlgen"
+            ],
+        ]);
+        
+        if ($proxy) {
+            $proxyStruct  = explode('://', $proxy);
+            $httpS        = $proxyStruct[0] . "://";
+            $proxyStruct  = explode('@', $proxyStruct[1]);
+        
+            if (isset($proxyStruct[1])) {
+                $proxyAuth    = $proxyStruct[0];
+                $proxyAddress = $httpS . $proxyStruct[1];
+            } else {
+                $proxyAuth    = false;
+                $proxyAddress = $httpS . $proxyStruct[0];
+            }
+
+            curl_setopt($curl, CURLOPT_PROXY, $proxyAddress);
+
+            if ($proxyAuth) {
+                curl_setopt($curl, CURLOPT_PROXYUSERPWD, $proxyAuth);
+            }
+        }
+
+        $response = curl_exec($curl);
+
+        curl_close($curl);
+
+        return $response;
+    }
+
+    /**
+     * Unfollow user with web API
+     *
+     * @param string      $userId       Numerical User PK ID.
+     *
+     * @throws \InvalidArgumentException
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GraphqlResponse
+     */
+    public function unfollowWeb(
+        $userId)
+    {
+        if ($userId == null) {
+            throw new \InvalidArgumentException('Empty $userId sent to getFollowersGraph() function.');
+        }
+
+        $csrftoken  = $this->ig->client->getToken();
+        $mid        = $this->ig->client->getCookie('csrftoken', 'i.instagram.com')->getValue();
+        $ds_user_id = $this->ig->client->getCookie('ds_user_id', 'i.instagram.com')->getValue();
+        $sessionid  = $this->ig->client->getCookie('sessionid', 'i.instagram.com')->getValue();
+        $urlgen     = $this->ig->client->getCookie('urlgen', 'i.instagram.com')->getValue();
+        $rur        = $this->ig->client->getCookie('rur', 'i.instagram.com')->getValue();
+        $proxy      = $this->ig->client->getProxy();
+
+        $curl = curl_init();
+
+        curl_setopt_array($curl, [
+            CURLOPT_URL            => "https://instagram.com/web/friendships/{$userId}/unfollow/",
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING       => "gzip, deflate, br",
+            CURLOPT_MAXREDIRS      => 10,
+            CURLOPT_TIMEOUT        => 0,
+            CURLOPT_USERAGENT      => "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36",
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST  => "POST",
+            CURLOPT_POSTFIELDS     => [
+                'userid'      => $userId
+                
+            ],
+            CURLOPT_HTTPHEADER     => [
+                "referrer: https://www.instagram.com/",
+                "x-ig-app-id: 936619743392459",
+                "x-instagram-ajax: f9e28d162740",
+                "sec-fetch-site: same-origin",
+                "sec-fetch-mode: cors",
+                "sec-fetch-dest: empty",
+                "accept: */*",
+                "accept-encoding: gzip, deflate, br",
+                "x-ig-www-claim: hmac.AR3VWu1WbtgZTYm1LI-JdffO71nek5ezN2CM-bQ6iN6n1Dka",
+                "x-requested-with: XMLHttpRequest",
+                "x-csrftoken: " . $csrftoken,
+                "Content-Type: application/x-www-form-urlencoded",
+                "Cookie: mid=".$mid."; ds_user_id=$ds_user_id; csrftoken=$csrftoken; sessionid=$sessionid; rur=$rur; urlgen=$urlgen"
+            ],
+        ]);
+        
+        if ($proxy) {
+            $proxyStruct  = explode('://', $proxy);
+            $httpS        = $proxyStruct[0] . "://";
+            $proxyStruct  = explode('@', $proxyStruct[1]);
+        
+            if (isset($proxyStruct[1])) {
+                $proxyAuth    = $proxyStruct[0];
+                $proxyAddress = $httpS . $proxyStruct[1];
+            } else {
+                $proxyAuth    = false;
+                $proxyAddress = $httpS . $proxyStruct[0];
+            }
+
+            curl_setopt($curl, CURLOPT_PROXY, $proxyAddress);
+
+            if ($proxyAuth) {
+                curl_setopt($curl, CURLOPT_PROXYUSERPWD, $proxyAuth);
+            }
+        }
+
+        $response = curl_exec($curl);
+
+        curl_close($curl);
+
+        return $response;
     }
 
     /**
@@ -960,6 +1309,46 @@ class People extends RequestCollection
     }
 
     /**
+     * Restrict a user account.
+     *
+     * @param string $userId Numerical UserPK ID.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\FriendshipResponse
+     */
+    public function restrict(
+        $userId)
+    {
+        return $this->ig->request('restrict_action/restrict/')
+            ->setSignedPost(false)
+            ->addPost('_uuid', $this->ig->uuid)
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->addPost('target_user_id', $userId)
+            ->getResponse(new Response\FriendshipResponse());
+    }
+
+    /**
+     * Unrestrict a user account.
+     *
+     * @param string $userId Numerical UserPK ID.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\FriendshipResponse
+     */
+    public function unrestrict(
+        $userId)
+    {
+        return $this->ig->request('restrict_action/unrestrict/')
+            ->setSignedPost(false)
+            ->addPost('_uuid', $this->ig->uuid)
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->addPost('target_user_id', $userId)
+            ->getResponse(new Response\FriendshipResponse());
+    }
+
+    /**
      * Mute stories, posts or both from a user.
      *
      * It prevents user media from showing up in the timeline and/or story feed.
@@ -1087,6 +1476,7 @@ class People extends RequestCollection
      * Block a user's ability to see your stories.
      *
      * @param string $userId Numerical UserPK ID.
+     * @param string $source (optional) The source where this request was triggered.
      *
      * @throws \InstagramAPI\Exception\InstagramException
      *
@@ -1095,13 +1485,14 @@ class People extends RequestCollection
      * @see People::muteFriendStory()
      */
     public function blockMyStory(
-        $userId)
+        $userId,
+        $source = 'profile')
     {
         return $this->ig->request("friendships/block_friend_reel/{$userId}/")
             ->addPost('_uuid', $this->ig->uuid)
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_csrftoken', $this->ig->client->getToken())
-            ->addPost('source', 'profile')
+            ->addPost('source', $source)
             ->getResponse(new Response\FriendshipResponse());
     }
 

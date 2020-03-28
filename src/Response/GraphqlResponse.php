@@ -70,6 +70,11 @@ class GraphqlResponse extends Response
         return $this->_getProperty('data')->getUser()->getBusinessManager()->getFollowersUnit()->getDaysHourlyFollowersGraph();
     }
 
+    public function getUserIDGraphData()
+    {
+        return $this->_getProperty('data')->getUser();
+    }
+
     /**
      * Checks if the response was successful.
      *

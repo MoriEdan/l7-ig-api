@@ -196,6 +196,60 @@ class Utils
     }
 
     /**
+     * Generates jazoest value for login.
+     *
+     * @param string $phoneId
+     *
+     * @return string
+     */
+    public static function generateJazoest(
+        $phoneId)
+    {
+        $jazoestPrefix = '2';
+        $array = str_split($phoneId);
+        $i = 0;
+        foreach ($array as $char) {
+            $i += ord($char);
+        }
+        return $jazoestPrefix.strval($i);
+    }
+
+    /**
+     * Generates Client Context value for Direct.
+     *
+     * @return int
+     */
+    public static function generateClientContext()
+    {
+        return (round(microtime(true) * 1000) << 22 | random_int(PHP_INT_MIN, PHP_INT_MAX) & 4194303) & PHP_INT_MAX;
+    }
+
+    /**
+     * Encrypt password for authentication.
+     *
+     * @param string $password      Password.
+     * @param string $publicKeyId   Public Key ID.
+     * @param string $publicKey     Public Key.
+     *
+     * @return string
+     */
+    public static function encryptPassword(
+        $password,
+        $publicKeyId,
+        $publicKey)
+    {
+        $key = openssl_random_pseudo_bytes(32);
+        $iv = openssl_random_pseudo_bytes(12);
+        $time = time();
+        $tag = null;
+        #$pubKey = openssl_pkey_get_public(Constants::IG_LOGIN_DEFAULT_ANDROID_PUBLIC_KEY);
+        openssl_public_encrypt($key ,$encryptedAesKey, base64_decode($publicKey));
+        $encrypted = openssl_encrypt($password, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, strval($time));
+        $payload = base64_encode("\x01" | pack('n', intval($publicKeyId)) . $iv . pack('s', strlen($encryptedAesKey)) . $encryptedAesKey . $tag . $encrypted);
+        return sprintf('#PWD_INSTAGRAM:4:%s:%s', $time, $payload);
+    }
+
+    /**
      * Converts a hours/minutes/seconds timestamp to seconds.
      *
      * @param string $timeStr Either `HH:MM:SS[.###]` (24h-clock) or
@@ -925,6 +979,133 @@ class Utils
     }
 
     /**
+     * Verifies an array of story quiz.
+     *
+     * @param array $storyQuiz Array with story quiz key-value pairs.
+     *
+     * @throws \InvalidArgumentException If it's missing keys or has invalid values.
+     */
+    public static function throwIfInvalidStoryQuiz(
+        array $storyQuiz)
+    {
+        $requiredKeys = ['z', 'question', 'options', 'correct_answer', 'viewer_can_answer', 'viewer_answer', 'text_color', 'start_background_color', 'end_background_color', 'is_sticker'];
+
+        if (count($storyQuiz) !== 1) {
+            throw new \InvalidArgumentException(sprintf('Only one story quiz is permitted. You added %d story quizzes.', count($storyQuiz)));
+        }
+
+        // Ensure that all keys exist.
+        $missingKeys = array_keys(array_diff_key(['z' => 1, 'question' => 1, 'options' => 1, 'correct_answer' => 1, 'viewer_can_answer' => 1, 'viewer_answer' => 1, 'text_color' => 1, 'start_background_color' => 1, 'end_background_color' => 1, 'is_sticker' => 1], $storyQuiz[0]));
+        if (count($missingKeys)) {
+            throw new \InvalidArgumentException(sprintf('Missing keys "%s" for story quiz array.', implode(', ', $missingKeys)));
+        }
+
+        foreach ($storyQuiz[0] as $k => $v) {
+            switch ($k) {
+                case 'z': // May be used for AR in the future, for now it's always 0.
+                    if ($v !== 0) {
+                        throw new \InvalidArgumentException(sprintf('Invalid value "%s" for story quiz array-key "%s".', $v, $k));
+                    }
+                    break;
+                case 'question':
+                    if (!is_string($v)) {
+                        throw new \InvalidArgumentException(sprintf('Invalid value "%s" for story quiz array-key "%s".', $v, $k));
+                    }
+                    break;
+                case 'text_color':
+                case 'start_background_color':
+                case 'end_background_color':
+                    if (!preg_match('/^[0-9a-fA-F]{6}$/', substr($v, 1))) {
+                        throw new \InvalidArgumentException(sprintf('Invalid value "%s" for story quiz array-key "%s".', $v, $k));
+                    }
+                    break;
+                case 'viewer_answer':
+                    if ($v !== -1) {
+                        throw new \InvalidArgumentException(sprintf('Invalid value "%s" for story quiz array-key "%s".', $v, $k));
+                    }
+                    break;
+                case 'viewer_can_answer':
+                    if (!is_bool($v) && $v !== false) {
+                        throw new \InvalidArgumentException(sprintf('Invalid value "%s" for story quiz array-key "%s".', $v, $k));
+                    }
+                    break;
+                case 'is_sticker':
+                    if (!is_bool($v) && $v !== true) {
+                        throw new \InvalidArgumentException(sprintf('Invalid value "%s" for story quiz array-key "%s".', $v, $k));
+                    }
+                    break;
+                case 'options':
+                    $optionCount = 0;
+                    foreach ($v as $curOption) {
+                        ++$optionCount;
+                        if (!is_string($curOption['text'])) {
+                            throw new \InvalidArgumentException(sprintf('Invalid value "%s" for story quiz array-key "%s".', $v, $k));
+                        }
+                        if ($curOption['count'] !== 0) {
+                            throw new \InvalidArgumentException(sprintf('Invalid value "%s" for story quiz array-key "%s".', $v, $k));
+                        }
+                    }
+                    if ($optionCount < 2 || $optionCount > 4) {
+                        throw new \InvalidArgumentException(sprintf('Invalid value "%s" for story quiz array-key "%s".', $v, $k));
+                    }
+                    break;
+            }
+        }
+        self::_throwIfInvalidStoryStickerPlacement(array_diff_key($storyQuiz[0], array_flip($requiredKeys)), 'quizzes');
+    }
+
+    /**
+     * Verifies an array of chat sticker.
+     *
+     * @param array $chatSticker Array with chat story key-value pairs.
+     *
+     * @throws \InvalidArgumentException If it's missing keys or has invalid values.
+     */
+    public static function throwIfInvalidChatSticker(
+        array $chatSticker)
+    {
+        $requiredKeys = ['z', 'type', 'text', 'start_background_color', 'end_background_color', 'is_pinned'];
+
+        if (count($chatSticker) !== 1) {
+            throw new \InvalidArgumentException(sprintf('Only one chat sticker is permitted. You added %d chat stickers.', count($chatSticker)));
+        }
+
+        // Ensure that all keys exist.
+        $missingKeys = array_keys(array_diff_key(['z' => 1, 'type' => 1, 'start_background_color' => 1, 'end_background_color' => 1, 'is_pinned' => 1], $chatSticker[0]));
+        if (count($missingKeys)) {
+            throw new \InvalidArgumentException(sprintf('Missing keys "%s" for chat sticker array.', implode(', ', $missingKeys)));
+        }
+
+        foreach ($chatSticker[0] as $k => $v) {
+            switch ($k) {
+                case 'z': // May be used for AR in the future, for now it's always 0.
+                    if ($v !== 0) {
+                        throw new \InvalidArgumentException(sprintf('Invalid value "%s" for chat sticker array-key "%s".', $v, $k));
+                    }
+                    break;
+                case 'type':
+                case 'text':
+                    if (!is_string($v)) {
+                        throw new \InvalidArgumentException(sprintf('Invalid value "%s" for chat sticker array-key "%s".', $v, $k));
+                    }
+                    break;
+                case 'start_background_color':
+                case 'end_background_color':
+                    if (!preg_match('/^[0-9a-fA-F]{6}$/', substr($v, 1))) {
+                        throw new \InvalidArgumentException(sprintf('Invalid value "%s" for chat sticker array-key "%s".', $v, $k));
+                    }
+                    break;
+                case 'is_pinned':
+                    if (!is_bool($v) && $v !== false) {
+                        throw new \InvalidArgumentException(sprintf('Invalid value "%s" for chat sticker array-key "%s".', $v, $k));
+                    }
+                    break;
+            }
+        }
+        self::_throwIfInvalidStoryStickerPlacement(array_diff_key($chatSticker[0], array_flip($requiredKeys)), 'chat_sticker');
+    }
+
+    /**
      * Verifies if tallies are valid.
      *
      * @param array[] $tallies Array with story poll key-value pairs.
@@ -1117,6 +1298,21 @@ class Utils
         }
 
         self::_throwIfInvalidStoryStickerPlacement(array_diff_key($attachedMedia, array_flip($requiredKeys)), 'attached media');
+    }
+
+    /**
+     * Verifies an attached IGTV media ID.
+     *
+     * @param string $felix_video_id IGTV media ID
+     *
+     * @throws \InvalidArgumentException If it's missing keys or has invalid values.
+     */
+    public static function throwIfInvalidIGTVMediaID(
+        $felix_video_id)
+    {
+        if (!is_string($felix_video_id) && !is_numeric($felix_video_id)) {
+            throw new \InvalidArgumentException(sprintf('Invalid value "%s" for felix_video_id (IGTV media).', $felix_video_id));
+        }
     }
 
     /**

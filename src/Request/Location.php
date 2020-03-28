@@ -1,12 +1,9 @@
 <?php
-
 namespace InstagramAPI\Request;
-
 use InstagramAPI\Exception\RequestHeadersTooLargeException;
 use InstagramAPI\Response;
 use InstagramAPI\Signatures;
 use InstagramAPI\Utils;
-
 /**
  * Functions related to finding and exploring locations.
  */
@@ -37,16 +34,13 @@ class Location extends RequestCollection
             ->addParam('rank_token', $this->ig->account_id.'_'.Signatures::generateUUID())
             ->addParam('latitude', $latitude)
             ->addParam('longitude', $longitude);
-
         if ($query === null) {
             $locations->addParam('timestamp', time());
         } else {
             $locations->addParam('search_query', $query);
         }
-
         return $locations->getResponse(new Response\LocationResponse());
     }
-
     /**
      * Search for Facebook locations by name.
      *
@@ -83,7 +77,6 @@ class Location extends RequestCollection
             $excludeList,
             $rankToken
         );
-
         try {
             /** @var Response\FBLocationResponse $result */
             $result = $location->getResponse(new Response\FBLocationResponse());
@@ -94,23 +87,22 @@ class Location extends RequestCollection
                 'rank_token' => $rankToken,
             ]);
         }
-
         return $result;
     }
-
     /**
      * Search for Facebook locations by geographical location.
      *
      * WARNING: The locations found by this function DO NOT work for attaching
      * locations to media uploads. Use Location::search() instead!
      *
-     * @param string         $latitude    Latitude.
-     * @param string         $longitude   Longitude.
-     * @param string|null    $query       (Optional) Finds locations containing this string.
-     * @param string[]|int[] $excludeList Array of numerical location IDs (ie "17841562498105353")
-     *                                    to exclude from the response, allowing you to skip locations
-     *                                    from a previous call to get more results.
-     * @param string|null    $rankToken   (When paginating) The rank token from the previous page's response.
+     * @param string         $latitude      Latitude.
+     * @param string         $longitude     Longitude.
+     * @param string|null    $query         (Optional) Finds locations containing this string.
+     * @param string[]|int[] $excludeList   Array of numerical location IDs (ie "17841562498105353")
+     *                                      to exclude from the response, allowing you to skip locations
+     *                                      from a previous call to get more results.
+     * @param string|null    $rankToken     (When paginating) The rank token from the previous page's response.
+     * @param string         $searchSurface (Optional) The place (surface) in the app where this action was triggered.
      *
      * @throws \InvalidArgumentException
      * @throws \InstagramAPI\Exception\InstagramException
@@ -125,13 +117,15 @@ class Location extends RequestCollection
         $longitude,
         $query = null,
         $excludeList = [],
-        $rankToken = null)
+        $rankToken = null,
+        $searchSurface = 'nearby_places_search_page')
     {
         $location = $this->_paginateWithExclusion(
             $this->ig->request('fbsearch/places/')
                 ->addParam('lat', $latitude)
                 ->addParam('lng', $longitude)
-                ->addParam('timezone_offset', date('Z')),
+                ->addParam('timezone_offset', date('Z'))
+                ->addParam('search_surface', $searchSurface),
             $excludeList,
             $rankToken,
             50
@@ -154,7 +148,6 @@ class Location extends RequestCollection
 
         return $result;
     }
-
     /**
      * Get related locations by location ID.
      *
@@ -176,7 +169,6 @@ class Location extends RequestCollection
             ->addParam('related_types', json_encode(['location']))
             ->getResponse(new Response\RelatedLocationResponse());
     }
-
     /**
      * Get the media feed for a location.
      *
@@ -204,7 +196,7 @@ class Location extends RequestCollection
     public function getFeed(
         $locationId,
         $rankToken,
-        $tab = 'ranked',
+        $tab = 'ranked',  
         $nextMediaIds = null,
         $nextPage = null,
         $maxId = null)
@@ -213,7 +205,6 @@ class Location extends RequestCollection
         if ($tab !== 'ranked' && $tab !== 'recent') {
             throw new \InvalidArgumentException('The provided section tab is invalid.');
         }
-
         $locationFeed = $this->ig->request("locations/{$locationId}/sections/")
             ->setSignedPost(false)
             ->addPost('rank_token', $rankToken)
@@ -221,25 +212,55 @@ class Location extends RequestCollection
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('session_id', $this->ig->session_id)
             ->addPost('tab', $tab);
-
         if ($nextMediaIds !== null) {
             if (!is_array($nextMediaIds) || !array_filter($nextMediaIds, 'is_int')) {
                 throw new \InvalidArgumentException('Next media IDs must be an Int[].');
             }
             $locationFeed->addPost('next_media_ids', json_encode($nextMediaIds));
         }
-
         if ($nextPage !== null) {
             $locationFeed->addPost('page', $nextPage);
         }
-
         if ($maxId !== null) {
             $locationFeed->addPost('max_id', $maxId);
         }
-
         return $locationFeed->getResponse(new Response\LocationFeedResponse());
     }
+    
+    /**
+     * Get the feed for a location via web API
+     *
+     * @param string      $locationId    The internal ID of a location (from a field
+     *                                   such as "pk", "external_id" or "facebook_places_id").
+     * @param int         $next_page     Limit the userlist.
+     * @param string|null $end_cursor    Next "maximum ID", used for pagination.
+     *
+     * @throws \InvalidArgumentException
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GraphqlResponse
+     */
+    public function getFeedGraph(
+        $locationId,
+        $next_page = 12,
+        $end_cursor = null)
+    {
+        if ($locationId == null) {
+            throw new \InvalidArgumentException('Empty $locationId provided to getFeedGraph() for location.');
+        }
 
+        return $request = $this->ig->request("graphql/query/")
+            ->setVersion(5)
+            ->setSignedPost(false)
+            ->addParam('query_hash', '1b84447a4d8b6d6d0426fefb34514485')
+            ->addParam('variables', json_encode([
+                "id" => $locationId,
+                "first" => $next_page,
+                "after" => $end_cursor,
+            ]))
+            ->getResponse(new Response\GraphqlResponse());
+    }
+		
     /**
      * Get the story feed for a location.
      *
@@ -257,7 +278,6 @@ class Location extends RequestCollection
         return $this->ig->request("locations/{$locationId}/story/")
             ->getResponse(new Response\LocationStoryResponse());
     }
-
     /**
      * Mark LocationStoryResponse story media items as seen.
      *
@@ -306,7 +326,6 @@ class Location extends RequestCollection
         if (!strlen($sourceId)) {
             throw new \InvalidArgumentException('Your provided LocationStoryResponse is invalid and does not contain any Location Story-Tray ID.');
         }
-
         // Ensure they only gave us valid items for this location response.
         // NOTE: We validate since people cannot be trusted to use their brain.
         $validIds = [];
@@ -322,7 +341,6 @@ class Location extends RequestCollection
                 ));
             }
         }
-
         // Mark the story items as seen, with the location as source ID.
         return $this->ig->internal->markStoryMediaSeen($items, $sourceId);
     }

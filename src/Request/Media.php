@@ -31,6 +31,24 @@ class Media extends RequestCollection
     }
 
     /**
+     * Get OEMBED info.
+     *
+     * @param string $mediaUrl Instagram webs media format. Example: https://www.instagram.com/p/ABCDEFGH.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\MediaInfoResponse
+     */
+    public function getOembedInfo(
+        $mediaUrl)
+    {
+        return $this->ig->request('oembed/')
+            ->setIsSilentFail(true)
+            ->addParam('url', $mediaUrl)
+            ->getResponse(new Response\MediaInfoResponse());
+    }
+
+    /**
      * Delete a media item.
      *
      * @param string     $mediaId   The media ID in Instagram's internal format (ie "3482384834_43294").
@@ -149,7 +167,7 @@ class Media extends RequestCollection
      */
     public function like(
         $mediaId,
-        $feedPosition,
+        $feedPosition = 0,
         $module = 'feed_timeline',
         $carouselBumped = false,
         array $extraData = [])
@@ -158,12 +176,13 @@ class Media extends RequestCollection
             ->addPost('_uuid', $this->ig->uuid)
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->addPost('device_id', $this->ig->device_id)
             ->addPost('media_id', $mediaId)
-            ->addPost('radio_type', 'wifi-none')
             ->addPost('container_module', $module)
+            ->addPost('radio_type', $this->ig->radio_type)
             ->addPost('feed_position', $feedPosition)
-            ->addPost('is_carousel_bumped_post', $carouselBumped)
-            ->addPost('device_id', $this->ig->device_id);
+            ->addPost('is_carousel_bumped_post', $carouselBumped);
+            
 
         if (isset($extraData['carousel_media'])) {
             $request->addPost('carousel_index', $extraData['carousel_index']);
@@ -199,7 +218,7 @@ class Media extends RequestCollection
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('media_id', $mediaId)
-            ->addPost('radio_type', 'wifi-none')
+            ->addPost('radio_type', $this->ig->radio_type)
             ->addPost('module_name', $module);
 
         $this->_parseLikeParameters('unlike', $request, $module, $extraData);
@@ -351,7 +370,7 @@ class Media extends RequestCollection
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('comment_text', $commentText)
             ->addPost('container_module', $module)
-            ->addPost('radio_type', 'wifi-none')
+            ->addPost('radio_type', $this->ig->radio_type)
             ->addPost('device_id', $this->ig->device_id)
             ->addPost('carousel_index', $carouselIndex)
             ->addPost('feed_position', $feedPosition)
@@ -418,6 +437,31 @@ class Media extends RequestCollection
         }
 
         return $request->getResponse(new Response\MediaCommentsResponse());
+    }
+
+    /**
+     * Get summary information about comments.
+     *
+     * @param string|string[] $mediaIds One or more media IDs in Instagram's internal format (ie "3482384834_43294"). Can be an array of strings or a single string.
+     *
+     * @throws \InvalidArgumentException
+     * @throws \RuntimeException
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\CommentInfosResponse
+     */
+    public function getCommentInfos(
+        $mediaIds)
+    {
+        if ($mediaIds === null) {
+            throw new \InvalidArgumentException('You can not pass null to mediaIds!');
+        }
+        if (is_array($mediaIds)) {
+            $mediaIds = implode(',', $mediaIds);
+        }
+        return $this->ig->request('media/comment_infos')
+            ->addParam('media_ids', $mediaIds)
+            ->getResponse(new Response\CommentInfosResponse());
     }
 
     /**
@@ -597,6 +641,22 @@ class Media extends RequestCollection
 
         return $this->ig->request("language/bulk_translate/?comment_ids={$commentIds}")
             ->getResponse(new Response\TranslateResponse());
+    }
+
+    /**
+     * Get information comment settings from a media ID.
+     *
+     * @param string $mediaId The media ID in Instagram's internal format (ie "3482384834_43294").
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\CommentInfoResponse
+     */
+    public function getCommentInfo(
+        $mediaId)
+    {
+        return $this->ig->request("media/{$mediaId}/comment_info/")
+            ->getResponse(new Response\CommentInfoResponse());
     }
 
     /**
@@ -784,10 +844,14 @@ class Media extends RequestCollection
 
         // Now parse the necessary parameters for the selected module.
         switch ($module) {
-        case 'feed_contextual_post': // "Explore" tab.
+        case 'feed_contextual_post': 
+        case 'feed_contextual_chain':
+            // "Explore" tab.
             if (isset($extraData['explore_source_token'])) {
                 // The explore media `Item::getExploreSourceToken()` value.
-                $request->addPost('explore_source_token', $extraData['explore_source_token']);
+                $request->addPost('explore_source_token', $extraData['explore_source_token'])
+                        ->addPost('chaining_session_id', Signatures::generateUUID())
+                        ->addPost('parent_m_pk', $extraData['media_id']);
             } else {
                 throw new \InvalidArgumentException(sprintf('Missing extra data for module "%s".', $module));
             }
@@ -813,34 +877,74 @@ class Media extends RequestCollection
             if (isset($extraData['hashtag'])) {
                 // The hashtag where the app found this media.
                 Utils::throwIfInvalidHashtag($extraData['hashtag']);
-                $request->addPost('hashtag', $extraData['hashtag']);
+                $request->addPost('hashtag_name', $extraData['hashtag']);
+                // $request->addPost('hashtag_id', $extraData['hashtag_id']);
+            } else {
+                throw new \InvalidArgumentException(sprintf('Missing extra data for module "%s".', $module));
+            }
+            break;
+        case 'hashtag_immersive_viewer':
+        case 'explore_video_chaining':
+        case 'explore_event_viewer':
+            if (isset($extraData['chaining_session_id'])) {
+                $request->addPost('chaining_session_id', $extraData['chaining_session_id']);
             } else {
                 throw new \InvalidArgumentException(sprintf('Missing extra data for module "%s".', $module));
             }
             break;
         case 'feed_contextual_location': // "Location" search result.
-            if (isset($extraData['location_id'])) {
-                // The location ID of this media.
-                $request->addPost('location_id', $extraData['location_id']);
+            if (isset($extraData['entity_page_name'])) {
+                // The entity page name.
+                $request->addPost('entity_page_name', $extraData['entity_page_name']);
+                // The entity page ID.
+                $request->addPost('entity_page_id', $extraData['entity_page_id']);
             } else {
                 throw new \InvalidArgumentException(sprintf('Missing extra data for module "%s".', $module));
             }
             break;
-        case 'feed_timeline': // "Timeline" tab (the global Home-feed with all
-                              // kinds of mixed news).
         case 'newsfeed': // "Followings Activity" feed tab. Used when
                          // liking/unliking a post that we clicked on from a
                          // single-activity "xyz liked abc's post" entry.
+        case 'feed_short_url': // When the like is done from a short URL media.
+                               // Example: https://www.instagram.com/p/abcdefhij1234/.
         case 'feed_contextual_newsfeed_multi_media_liked':  // "Followings
-                                                            // Activity" feed
-                                                            // tab. Used when
-                                                            // liking/unliking a
-                                                            // post that we
-                                                            // clicked on from a
-                                                            // multi-activity
-                                                            // "xyz liked 5
-                                                            // posts" entry.
+        // Activity" feed
+        // tab. Used when
+        // liking/unliking a
+        // post that we
+        // clicked on from a
+        // multi-activity
+        // "xyz liked 5
+        // posts" entry.
+        case 'igtv_profile': // Go to a user profile and click at their IGTV icon.
+        case 'igtv_explore_grid':
+        case 'igtv_explore_pinned_nav': // Go to Explore and then IGTV section.
             break;
+        case 'feed_timeline': // "Timeline" tab (the global Home-feed with all
+                                // kinds of mixed news).
+        case 'feed_contextual_profile':
+        case 'igtv_feed_timeline': // IGTV timeline feed.
+            $request->addPost('inventory_source', 'media_or_ad');
+            break;
+        case 'instagram_shopping_home_creators_contextual_feed':
+        case 'instagram_shopping_home_checkout_contextual_feed':
+            if (isset($extraData['topic_cluster_id']) && isset($extraData['topic_cluster_type'])
+                && isset($extraData['topic_cluster_session_id']) && isset($extraData['topic_cluster_title'])
+                && isset($extraData['topic_nav_order'])) {
+                // Cluster ID. Example: shopping:0.
+                $request->addPost('topic_cluster_id', $extraData['topic_cluster_id']);
+                // Cluster type. Example: shopping.
+                $request->addPost('topic_cluster_type', $extraData['topic_cluster_type']);
+                // Cluster session ID. UUID.
+                $request->addPost('topic_cluster_session_id', $extraData['topic_cluster_session_id']);
+                // Cluster title. Example: Shop
+                $request->addPost('topic_cluster_title', $extraData['topic_cluster_title']);
+                // Topic Nav Order. Int.
+                $request->addPost('topic_nav_order', $extraData['topic_nav_order']);
+            } else {
+                throw new \InvalidArgumentException(sprintf('Missing extra data for module "%s".', $module));
+            }
+            // no break
         default:
             throw new \InvalidArgumentException(sprintf('Invalid module name. %s does not correspond to any of the valid module names.', $module));
         }

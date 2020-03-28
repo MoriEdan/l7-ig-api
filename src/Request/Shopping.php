@@ -26,13 +26,13 @@ class Shopping extends RequestCollection
         $productId,
         $mediaId,
         $merchantId,
-        $deviceWidth = 720)
+        $deviceWidth = 1080)
     {
         return $this->ig->request("commerce/products/{$productId}/details/")
             ->addParam('source_media_id', $mediaId)
             ->addParam('merchant_id', $merchantId)
             ->addParam('device_width', $deviceWidth)
-            ->addParam('hero_carousel_enabled', true)
+            ->addParam('shopping_bag_enabled', true)
             ->getResponse(new Response\OnTagProductResponse());
     }
 
@@ -79,7 +79,7 @@ class Shopping extends RequestCollection
             }
             $offset = [
                 'offset' => $offset,
-                'tier'   => 'products.elasticsearch.thrift.atn',
+                'tier'   => 'products.elasticsearch.thrift.lla',
             ];
         }
 
@@ -93,7 +93,7 @@ class Shopping extends RequestCollection
 
         return $this->ig->request('wwwgraphql/ig/query/')
             ->addUnsignedPost('doc_id', '1747750168640998')
-            ->addUnsignedPost('locale', Constants::ACCEPT_LANGUAGE)
+            ->addUnsignedPost('locale', $this->ig->getLocale())
             ->addUnsignedPost('vc_policy', 'default')
             ->addUnsignedPost('strip_nulls', true)
             ->addUnsignedPost('strip_defaults', true)

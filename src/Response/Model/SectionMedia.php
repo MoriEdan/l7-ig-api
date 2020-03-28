@@ -1,9 +1,6 @@
 <?php
-
 namespace InstagramAPI\Response\Model;
-
 use InstagramAPI\AutoPropertyMapper;
-
 /**
  * SectionMedia.
  *

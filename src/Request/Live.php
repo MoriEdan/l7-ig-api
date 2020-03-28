@@ -161,6 +161,164 @@ class Live extends RequestCollection
     }
 
     /**
+     * Join a live broadcast conference.
+     *
+     * This method requires a WebRTC implementation by the user. You will need to provide a valid SDP Offer and
+     * Instagram will send you the SDP response, cluster, conference name and nonce, so you will be able to stablish
+     * a WebRTC conference.
+     *
+     * @param string $broadcastId  The broadcast ID in Instagram's internal format (ie "17854587811139572").
+     * @param string $sdpOffer     SDP offer.
+     * @param int    $targetHeight (optional) Target height.
+     * @param int    $targetWidth  (optional) Target width.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\BroadcastJoinResponse
+     */
+    public function join(
+        $broadcastId,
+        $sdpOffer,
+        $targetHeight = 768,
+        $targetWidth = 400)
+    {
+        return $this->ig->request("live/{$broadcastId}/join/")
+            ->addPost('sdp_offer', $sdpOffer)
+            ->addPost('target_video_height', $targetHeight)
+            ->addPost('target_video_width', $targetWidth)
+            ->addPost('_uid', $this->ig->account_id)
+            ->addPost('_uuid', $this->ig->uuid)
+            ->addPost('device_id', $this->ig->device_id)
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->getResponse(new Response\BroadcastJoinResponse());
+    }
+
+    /**
+     * Invite a friend to a live broadcast conference.
+     *
+     * @param string $broadcastId           The broadcast ID in Instagram's internal format (ie "17854587811139572").
+     * @param string $userId                Numerical UserPK ID.
+     * @param string $encodedServerDataInfo Encoded server data info.
+     * @param int    $videoOffset           Offset to video start.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GenericResponse
+     */
+    public function inviteFriend(
+        $broadcastId,
+        $userId,
+        $encodedServerDataInfo,
+        $videoOffset)
+    {
+        return $this->ig->request("live/{$broadcastId}/join/")
+            ->addPost('invitees', $userId)
+            ->addPost('offset_to_video_start', $videoOffset)
+            ->addPost('encoded_server_data_info', $encodedServerDataInfo)
+            ->addPost('_uid', $this->ig->account_id)
+            ->addPost('_uuid', $this->ig->uuid)
+            ->addPost('device_id', $this->ig->device_id)
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->getResponse(new Response\GenericResponse());
+    }
+
+    /**
+     * Kick friend from live broadcast conference.
+     *
+     * @param string $broadcastId           The broadcast ID in Instagram's internal format (ie "17854587811139572").
+     * @param string $userId                Numerical UserPK ID.
+     * @param string $encodedServerDataInfo Encoded server data info.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GenericResponse
+     */
+    public function kickFriend(
+        $broadcastId,
+        $userId,
+        $encodedServerDataInfo)
+    {
+        return $this->ig->request("live/{$broadcastId}/kickout/")
+            ->addPost('users_to_be_removed', $userId)
+            ->addPost('reason', 'remove_guest')
+            ->addPost('encoded_server_data_info', $encodedServerDataInfo)
+            ->addPost('_uid', $this->ig->account_id)
+            ->addPost('_uuid', $this->ig->uuid)
+            ->addPost('device_id', $this->ig->device_id)
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->getResponse(new Response\GenericResponse());
+    }
+
+    /**
+     * Leave a live broadcast conference.
+     *
+     * @param string $broadcastId           The broadcast ID in Instagram's internal format (ie "17854587811139572").
+     * @param string $encodedServerDataInfo Encoded server data info.
+     * @param int    $numberOfParticipants  Number of participants.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GenericResponse
+     */
+    public function leaveConference(
+        $broadcastId,
+        $encodedServerDataInfo,
+        $numberOfParticipants = 0)
+    {
+        return $this->ig->request("live/{$broadcastId}/kickout/")
+            ->addPost('num_participants', $numberOfParticipants)
+            ->addPost('reason', 'leave_broadcast')
+            ->addPost('encoded_server_data_info', $encodedServerDataInfo)
+            ->addPost('_uid', $this->ig->account_id)
+            ->addPost('_uuid', $this->ig->uuid)
+            ->addPost('device_id', $this->ig->device_id)
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->getResponse(new Response\GenericResponse());
+    }
+
+    /**
+     * Confirm live broadcast conference event.
+     *
+     * @param string $broadcastId           The broadcast ID in Instagram's internal format (ie "17854587811139572").
+     * @param string $encodedServerDataInfo Encoded server data info.
+     * @param string $messageType           Message type. `CONFERENCE_STATE` or `SERVER_MEDIA_UPDATE`.
+     * @param int    $curVersion
+     * @param string $transactionId
+     *
+     * @throws \InvalidArgumentException
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GenericResponse
+     */
+    public function confirmEvent(
+        $broadcastId,
+        $encodedServerDataInfo,
+        $messageType,
+        $curVersion,
+        $transactionId)
+    {
+        $messageTypes = [
+            'CONFERENCE_STATE',
+            'SERVER_MEDIA_UPDATE',
+        ];
+
+        if (!in_array($messageType, $messageTypes, true)) {
+            throw new \InvalidArgumentException('Invalid message type.');
+        }
+
+        return $this->ig->request("live/{$broadcastId}/confirm/")
+            ->addPost('message_type', $messageType)
+            ->addPost('cur_version', $curVersion)
+            ->addPost('transaction_id', $transactionId)
+            ->addPost('encoded_server_data_info', $encodedServerDataInfo)
+            ->addPost('_uid', $this->ig->account_id)
+            ->addPost('_uuid', $this->ig->uuid)
+            ->addPost('device_id', $this->ig->device_id)
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->getResponse(new Response\GenericResponse());
+    }
+
+    /**
      * Show question in a live broadcast.
      *
      * @param string $broadcastId The broadcast ID in Instagram's internal format (ie "17854587811139572").
@@ -218,7 +376,7 @@ class Live extends RequestCollection
         $broadcastId,
         $questionText)
     {
-        return $this->ig->request("live/{$broadcastId}/questions")
+        return $this->ig->request("live/{$broadcastId}/questions/")
             ->setSignedPost(false)
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('text', $questionText)
@@ -254,6 +412,21 @@ class Live extends RequestCollection
         return $this->ig->request("live/{$broadcastId}/questions/")
             ->addParam('sources', 'story_and_live')
             ->getResponse(new Response\BroadcastQuestionsResponse());
+    }
+
+    /**
+     * Get live presence of your followers.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\PresencesResponse
+     */
+    public function getLivePresence()
+    {
+        return $this->ig->request('live/get_live_presence/')
+            ->addParam('presence_type', '10min_green_dot')
+            ->addParam('min_active_count', 4)
+            ->getResponse(new Response\PresencesResponse());
     }
 
     /**

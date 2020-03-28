@@ -136,6 +136,35 @@ class Story extends RequestCollection
     }
 
     /**
+     * Get multiple users' latest stories at once.
+     *
+     * @param string|string[] $feedList List of numerical UserPK IDs.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\ReelsTrayFeedResponse
+     */
+    public function getLatestStoryMedia(
+        $feedList)
+    {
+        if (!is_array($feedList)) {
+            $feedList = [$feedList];
+        }
+
+        foreach ($feedList as &$value) {
+            $value = (string) $value;
+        }
+        unset($value); // Clear reference.
+
+        return $this->ig->request('feed/get_latest_reel_media/')
+            ->setSignedPost(false)
+            ->addPost('user_ids', $feedList) // Must be string[] array.
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->addPost('_uuid', $this->ig->uuid)
+            ->getResponse(new Response\ReelsTrayFeedResponse());
+    }
+
+    /**
      * Get a specific user's story reel feed.
      *
      * This function gets the user's story Reel object directly, which always
@@ -227,6 +256,293 @@ class Story extends RequestCollection
     }
 
     /**
+     * Get a specific user's story reel feed with web API
+     *
+     * This function gets the user's story Reel object directly, which always
+     * exists and contains information about the user and their last story even
+     * if that user doesn't have any active story anymore.
+     *
+     * @param string $userId Numerical UserPK ID.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\UserReelMediaFeedResponse
+     *
+     * @see Story::getUserStoryFeed()
+     */
+	public function getReelsMediaFeedGraph(
+        $feedList, 
+        $source = 'feed_timeline') 
+    {
+        if (!is_array($feedList)) {
+            $feedList = [$feedList];
+        }
+
+        foreach ($feedList as &$value) {
+            $value = (string) $value;
+        }
+        unset($value); // Clear reference.
+
+        return $this->ig->request("graphql/query/")
+            ->setVersion(5)
+            ->setSignedPost(false)
+            ->addParam('query_hash', '52a36e788a02a3c612742ed5146f1676')
+            ->addParam('variables', json_encode([
+                "reel_ids" => $feedList,
+                "tag_names" => [],
+                "location_ids" => [],
+                "source" => $source,
+                "highlight_reel_ids" => [],
+                "precomposed_overlay" => false,
+                "show_story_viewer_list" => true,
+                "story_viewer_fetch_count" => 50,
+                "story_viewer_cursor" => "",
+                "stories_video_dash_manifest" => false
+            ]))
+            ->getResponse(new Response\GenericResponse());
+    }
+
+    /**
+     * Get a specific user's story reel feed with web API (v2, just name changed for compatibility with some scripts)
+     *
+     * This function gets the user's story Reel object directly, which always
+     * exists and contains information about the user and their last story even
+     * if that user doesn't have any active story anymore.
+     *
+     * @param string $userId Numerical UserPK ID.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\UserReelMediaFeedResponse
+     *
+     * @see Story::getUserStoryFeed()
+     */
+	public function getReelsMediaFeedWeb(
+        $feedList, 
+        $source = 'feed_timeline') 
+    {
+        if (!is_array($feedList)) {
+            $feedList = [$feedList];
+        }
+
+        foreach ($feedList as &$value) {
+            $value = (string) $value;
+        }
+        unset($value); // Clear reference.
+
+        return $this->ig->request("graphql/query/")
+            ->setVersion(5)
+            ->setSignedPost(false)
+            ->addParam('query_hash', '52a36e788a02a3c612742ed5146f1676')
+            ->addParam('variables', json_encode([
+                "reel_ids" => $feedList,
+                "tag_names" => [],
+                "location_ids" => [],
+                "source" => $source,
+                "highlight_reel_ids" => [],
+                "precomposed_overlay" => false,
+                "show_story_viewer_list" => true,
+                "story_viewer_fetch_count" => 50,
+                "story_viewer_cursor" => "",
+                "stories_video_dash_manifest" => false
+            ]))
+            ->getResponse(new Response\GenericResponse());
+    }
+
+    /**
+     * Mark story media item as seen with web API
+     */
+    public function markMediaSeenGraph($reelMediaId, $reelMediaOwnerId, $reelMediaTakenAt)
+    {        
+        $csrftoken  = $this->ig->client->getToken();
+        $mid        = $this->ig->client->getCookie('csrftoken', 'i.instagram.com')->getValue();
+        $ds_user_id = $this->ig->client->getCookie('ds_user_id', 'i.instagram.com')->getValue();
+        $sessionid  = $this->ig->client->getCookie('sessionid', 'i.instagram.com')->getValue();
+        $urlgen     = $this->ig->client->getCookie('urlgen', 'i.instagram.com')->getValue();
+        $rur        = $this->ig->client->getCookie('rur', 'i.instagram.com')->getValue();
+        $proxy      = $this->ig->client->getProxy();
+
+        $curl = curl_init();
+
+        curl_setopt_array($curl, [
+            CURLOPT_URL            => "https://www.instagram.com/stories/reel/seen",
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING       => "",
+            CURLOPT_MAXREDIRS      => 10,
+            CURLOPT_TIMEOUT        => 0,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST  => "POST",
+            CURLOPT_POSTFIELDS     => [
+                'reelMediaId'      => $reelMediaId,
+                'reelMediaOwnerId' => $reelMediaOwnerId,
+                'reelId'           => $reelMediaOwnerId,
+                'reelMediaTakenAt' => $reelMediaTakenAt,
+                'viewSeenAt'       => $reelMediaTakenAt
+            ],
+            CURLOPT_HTTPHEADER     => [
+                "x-csrftoken: " . $csrftoken,
+                "Content-Type: multipart/form-data",
+                "Cookie: mid=".$mid."; ds_user_id=$ds_user_id; csrftoken=$csrftoken; sessionid=$sessionid; rur=$rur; urlgen=$urlgen"
+            ],
+        ]);
+        
+        if ($proxy) {
+            $proxyStruct  = explode('://', $proxy);
+            $httpS        = $proxyStruct[0] . "://";
+            $proxyStruct  = explode('@', $proxyStruct[1]);
+        
+            if (isset($proxyStruct[1])) {
+                $proxyAuth    = $proxyStruct[0];
+                $proxyAddress = $httpS . $proxyStruct[1];
+            } else {
+                $proxyAuth    = false;
+                $proxyAddress = $httpS . $proxyStruct[0];
+            }
+
+            curl_setopt($curl, CURLOPT_PROXY, $proxyAddress);
+
+            if ($proxyAuth) {
+                curl_setopt($curl, CURLOPT_PROXYUSERPWD, $proxyAuth);
+            }
+        }
+
+        $response = curl_exec($curl);
+
+        curl_close($curl);
+
+        return $response;
+    }
+
+    /**
+     * Mark story media item as seen with web API (v2, just name changed for compatibility with some scripts)
+     */
+    public function markMediaSeenWeb($reelMediaId, $reelMediaOwnerId, $reelMediaTakenAt)
+    {        
+        $csrftoken  = $this->ig->client->getToken();
+        $mid        = $this->ig->client->getCookie('csrftoken', 'i.instagram.com')->getValue();
+        $ds_user_id = $this->ig->client->getCookie('ds_user_id', 'i.instagram.com')->getValue();
+        $sessionid  = $this->ig->client->getCookie('sessionid', 'i.instagram.com')->getValue();
+        $urlgen     = $this->ig->client->getCookie('urlgen', 'i.instagram.com')->getValue();
+        $rur        = $this->ig->client->getCookie('rur', 'i.instagram.com')->getValue();
+        $proxy      = $this->ig->client->getProxy();
+
+        $curl = curl_init();
+
+        curl_setopt_array($curl, [
+            CURLOPT_URL            => "https://www.instagram.com/stories/reel/seen",
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING       => "",
+            CURLOPT_MAXREDIRS      => 10,
+            CURLOPT_TIMEOUT        => 0,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST  => "POST",
+            CURLOPT_POSTFIELDS     => [
+                'reelMediaId'      => $reelMediaId,
+                'reelMediaOwnerId' => $reelMediaOwnerId,
+                'reelId'           => $reelMediaOwnerId,
+                'reelMediaTakenAt' => $reelMediaTakenAt,
+                'viewSeenAt'       => $reelMediaTakenAt
+            ],
+            CURLOPT_HTTPHEADER     => [
+                "x-csrftoken: " . $csrftoken,
+                "Content-Type: multipart/form-data",
+                "Cookie: mid=".$mid."; ds_user_id=$ds_user_id; csrftoken=$csrftoken; sessionid=$sessionid; rur=$rur; urlgen=$urlgen"
+            ],
+        ]);
+        
+        if ($proxy) {
+            $proxyStruct  = explode('://', $proxy);
+            $httpS        = $proxyStruct[0] . "://";
+            $proxyStruct  = explode('@', $proxyStruct[1]);
+        
+            if (isset($proxyStruct[1])) {
+                $proxyAuth    = $proxyStruct[0];
+                $proxyAddress = $httpS . $proxyStruct[1];
+            } else {
+                $proxyAuth    = false;
+                $proxyAddress = $httpS . $proxyStruct[0];
+            }
+
+            curl_setopt($curl, CURLOPT_PROXY, $proxyAddress);
+
+            if ($proxyAuth) {
+                curl_setopt($curl, CURLOPT_PROXYUSERPWD, $proxyAuth);
+            }
+        }
+
+        $response = curl_exec($curl);
+
+        curl_close($curl);
+
+        return $response;
+    }
+
+    /**
+     * Get injected stories (ads).
+     *
+     * @param string[]|int[] $storyUserIds  Array of numerical UserPK IDs.
+     * @param string         $traySessionId UUID v4.
+     * @param int            $entryIndex.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\ReelsMediaResponse
+     */
+    public function getInjectedStories(
+        array $storyUserIds,
+        $traySessionId,
+        $entryIndex = 0)
+    {
+        if ($entryIndex < 0) {
+            throw new \InvalidArgumentException('Entry index must be a positive number.');
+        }
+
+        if (!count($storyUserIds)) {
+            throw new \InvalidArgumentException('Please provide at least one user.');
+        }
+        foreach ($storyUserIds as &$storyUserId) {
+            if (!is_scalar($storyUserId)) {
+                throw new \InvalidArgumentException('User identifier must be scalar.');
+            } elseif (!ctype_digit($storyUserId) && (!is_int($storyUserId) || $storyUserId < 0)) {
+                throw new \InvalidArgumentException(sprintf('"%s" is not a valid user identifier.', $storyUserId));
+            }
+            $storyUserId = (string) $storyUserId;
+        }
+
+        $request = $this->ig->request('feed/injected_reels_media/')
+            ->setIsBodyCompressed(true)
+            ->addPost('_uuid', $this->ig->uuid)
+            ->addPost('_uid', $this->ig->account_id)
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->addPost('inserted_netego_indices', [])
+            ->addPost('ad_and_netego_request_information', [])
+            ->addPost('inserted_ad_indices', [])
+            ->addPost('ad_request_index', '0')
+            ->addPost('is_inventory_based_request_enabled', '0')
+            ->addPost('is_ad_pod_enabled', '0')
+            ->addPost('battery_level', $this->ig->getBatteryLevel())
+            ->addPost('tray_session_id', $traySessionId)
+            ->addPost('viewer_session_id', md5($traySessionId))
+            ->addPost('reel_position', '0')
+            ->addPost('is_charging', $this->ig->getIsDeviceCharging())
+            ->addPost('will_sound_on', '1')
+            ->addPost('surface_q_id', '2247106998672735')
+            ->addPost('tray_user_ids', $storyUserIds)
+            ->addPost('is_media_based_insertion_enabled', '1')
+            ->addPost('entry_point_index', ($entryIndex !== 0) ? strval($entryIndex) : '0')
+            ->addPost('is_first_page', ($entryIndex !== 0) ? '0' : '1');
+
+        if ($this->ig->getIsAndroid()) {
+            $request->addPost('phone_id', $this->ig->phone_id)
+                    ->addPost('device_id', $this->ig->uuid);
+        }
+
+        return $request->getResponse(new Response\ReelsMediaResponse());
+    }
+
+    /**
      * Get your archived story media feed.
      *
      * @throws \InstagramAPI\Exception\InstagramException
@@ -241,6 +557,22 @@ class Story extends RequestCollection
             ->addParam('include_cover', 0)
             ->addParam('timezone_offset', date('Z'))
             ->getResponse(new Response\ArchivedStoriesFeedResponse());
+    }
+
+    /**
+     * Get archive badge count.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\ArchiveBadgeCountResponse
+     */
+    public function getArchiveBadgeCount()
+    {
+        return $this->ig->request('archive/reel/profile_archive_badge/')
+            ->addParam('timezone_offset', date('Z'))
+            ->addParam('_uuid', $this->ig->uuid)
+            ->addParam('_csrftoken', $this->ig->client->getToken())
+            ->getResponse(new Response\ArchiveBadgeCountResponse());
     }
 
     /**
@@ -296,7 +628,7 @@ class Story extends RequestCollection
             ->addPost('_uuid', $this->ig->uuid)
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_csrftoken', $this->ig->client->getToken())
-            ->addPost('radio_type', 'wifi-none')
+            ->addPost('radio_type', $this->ig->radio_type)
             ->addPost('vote', $votingOption)
             ->getResponse(new Response\ReelMediaViewerResponse());
     }
@@ -329,8 +661,40 @@ class Story extends RequestCollection
             ->addPost('_uuid', $this->ig->uuid)
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_csrftoken', $this->ig->client->getToken())
-            ->addPost('radio_type', 'wifi-none')
+            ->addPost('radio_type', $this->ig->radio_type)
             ->addPost('vote', $votingOption)
+            ->getResponse(new Response\ReelMediaViewerResponse());
+    }
+
+    /**
+     * Vote on a story quiz.
+     *
+     * Note that once you vote on a story quiz, you cannot change your vote.
+     *
+     *
+     * @param string $storyPk       The story media item's PK in Instagram's internal format (ie "3482384834").  
+     * @param string $quizId        The quiz ID in Instagram's internal format (ie "17956159684032257").    
+     * @param int    $votingOption  Value that represents the voting option of the voter. Should be a float from 0 to 3.
+     *
+     * @throws \InvalidArgumentException
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\ReelMediaViewerResponse
+     */
+    public function voteQuizStory(
+        $storyPk,
+        $quizId,
+        $votingOption)
+    {
+        if ($votingOption < 0 || $votingOption > 3) {
+            throw new \InvalidArgumentException('You must provide a valid value from 0 to 3 for voting quiz.');
+        }
+
+        return $this->ig->request("media/{$storyPk}/{$quizId}/story_quiz_answer/")
+            ->setSignedPost(false)
+            ->addPost('_uuid', $this->ig->uuid)
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->addPost('answer', $votingOption)
             ->getResponse(new Response\ReelMediaViewerResponse());
     }
 
@@ -421,6 +785,31 @@ class Story extends RequestCollection
     }
 
     /**
+     * Deletes an answer to a story question.
+     *
+     * Note that you must be the owner of the story
+     * to delete an answer!
+     *
+     * @param string $storyId  The story media item's ID in Instagram's internal format (ie "1542304813904481224").
+     * @param string $answerId The question ID in Instagram's internal format (ie "17956159684032257").
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GenericResponse
+     */
+    public function deleteStoryQuestionAnswer(
+        $storyId,
+        $answerId)
+    {
+        return $this->ig->request("media/{$storyId}/delete_story_question_response/")
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->addPost('_uid', $this->ig->account_id)
+            ->addPost('_uuid', $this->ig->uuid)
+            ->addPost('question_id', $answerId)
+            ->getResponse(new Response\GenericResponse());
+    }
+
+    /**
      * Gets the created story countdowns of the current account.
      *
      * @throws \InstagramAPI\Exception\InstagramException
@@ -469,6 +858,57 @@ class Story extends RequestCollection
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_uuid', $this->ig->uuid)
             ->getResponse(new Response\GenericResponse());
+    }
+
+     /**
+     * Respond to a quiz sticker on a story.
+     *
+     * Note that once you vote on a story quiz, you cannot change your vote.
+     *
+     * @param string $storyId        The story media item's ID in Instagram's internal format (ie "1542304813904481224_6112344004").
+     * @param string $quizId         The quiz ID in Instagram's internal format (ie "17956159684032257").
+     * @param int    $selectedOption The option you select (Can be 0, 1, 2, 3).
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GenericResponse
+     */
+    public function answerStoryQuiz(
+        $storyId,
+        $quizId,
+        $selectedOption)
+    {
+        return $this->ig->request("media/{$storyId}/{$quizId}/story_quiz_answer/")
+            ->setSignedPost(false)
+            ->addPost('answer', $selectedOption)
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->addPost('_uuid', $this->ig->uuid)
+            ->getResponse(new Response\GenericResponse());
+    }
+
+    /**
+     * Get all responses of a story quiz.
+     *
+     * @param string      $storyId The story media item's ID in Instagram's internal format (ie "1542304813904481224_6112344004").
+     * @param string      $quizId  The question ID in Instagram's internal format (ie "17956159684032257").
+     * @param string|null $maxId   Next "maximum ID", used for pagination.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\StoryQuizAnswersResponse
+     */
+    public function getStoryQuizAnswers(
+        $storyId,
+        $quizId,
+        $maxId = null)
+    {
+        $request = $this->ig->request("media/{$storyId}/{$quizId}/story_quiz_participants/");
+
+        if ($maxId !== null) {
+            $request->addParam('max_id', $maxId);
+        }
+
+        return $request->getResponse(new Response\StoryQuizAnswersResponse());
     }
 
     /**
@@ -689,5 +1129,29 @@ class Story extends RequestCollection
         }
 
         return $request->getResponse(new Response\ReelSettingsResponse());
+    }
+
+     /**
+     * Validate story URL
+     * 
+     * @param string $url Link that will be validated by Instagram server       
+     * 
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GenericResponse
+     */
+    public function validateStoryURL(
+        $url)
+    {
+        if ($url == null) {
+            throw new \InvalidArgumentException('You must provide a valid story url for validation.');
+        }
+
+        return $this->ig->request("media/validate_reel_url/")
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->addPost('_uid', $this->ig->account_id)
+            ->addPost('_uuid', $this->ig->uuid)
+            ->addPost('url', $url)
+            ->getResponse(new Response\GenericResponse());
     }
 }

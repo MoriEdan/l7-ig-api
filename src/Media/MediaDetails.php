@@ -159,14 +159,14 @@ abstract class MediaDetails
 
         // Check Aspect Ratio.
         // NOTE: This Instagram rule is the same for both videos and photos.
-        $aspectRatio = $this->getAspectRatio();
-        $minAspectRatio = $constraints->getMinAspectRatio();
-        $maxAspectRatio = $constraints->getMaxAspectRatio();
-        if ($aspectRatio < $minAspectRatio || $aspectRatio > $maxAspectRatio) {
-            throw new \InvalidArgumentException(sprintf(
-                'Instagram only accepts %s media with aspect ratios between %.3f and %.3f. Your file "%s" has a %.4f aspect ratio.',
-                $constraints->getTitle(), $minAspectRatio, $maxAspectRatio, $mediaFilename, $aspectRatio
-            ));
-        }
+        // $aspectRatio = $this->getAspectRatio();
+        // $minAspectRatio = $constraints->getMinAspectRatio();
+        // $maxAspectRatio = $constraints->getMaxAspectRatio();
+        // if ($aspectRatio < $minAspectRatio || $aspectRatio > $maxAspectRatio) {
+        //    throw new \InvalidArgumentException(sprintf(
+        //        'Instagram only accepts %s media with aspect ratios between %.3f and %.3f. Your file "%s" has a %.4f aspect ratio.',
+        //        $constraints->getTitle(), $minAspectRatio, $maxAspectRatio, $mediaFilename, $aspectRatio
+        //    ));
+        // }
     }
 }

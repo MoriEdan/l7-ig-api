@@ -40,7 +40,7 @@ class Internal extends RequestCollection
     const MAX_RESUMABLE_RETRIES = 15;
 
     /** @var int Number of retries for each media configuration. */
-    const MAX_CONFIGURE_RETRIES = 5;
+    const MAX_CONFIGURE_RETRIES = 10;
 
     /** @var int Minimum video chunk size in bytes. */
     const MIN_CHUNK_SIZE = 204800;
@@ -75,6 +75,7 @@ class Internal extends RequestCollection
         // Make sure we only allow these particular feeds for this function.
         if ($targetFeed !== Constants::FEED_TIMELINE
             && $targetFeed !== Constants::FEED_STORY
+            && $targetFeed !== Constants::FEED_DIRECT
             && $targetFeed !== Constants::FEED_DIRECT_STORY
         ) {
             throw new \InvalidArgumentException(sprintf('Bad target feed "%s".', $targetFeed));
@@ -100,6 +101,10 @@ class Internal extends RequestCollection
         // Perform the upload.
         $this->uploadPhotoData($targetFeed, $internalMetadata);
 
+        if ($targetFeed === Constants::FEED_DIRECT) {
+            return $internalMetadata;
+        }
+
         // Configure the uploaded image and attach it to our timeline/story.
         $configure = $this->configureSinglePhoto($targetFeed, $internalMetadata, $externalMetadata);
 
@@ -120,11 +125,6 @@ class Internal extends RequestCollection
         $targetFeed,
         InternalMetadata $internalMetadata)
     {
-        // Make sure we disallow some feeds for this function.
-        if ($targetFeed === Constants::FEED_DIRECT) {
-            throw new \InvalidArgumentException(sprintf('Bad target feed "%s".', $targetFeed));
-        }
-
         // Make sure we have photo details.
         if ($internalMetadata->getPhotoDetails() === null) {
             throw new \InvalidArgumentException('Photo details are missing from the internal metadata.');
@@ -132,13 +132,14 @@ class Internal extends RequestCollection
 
         try {
             // Upload photo file with one of our photo uploaders.
-            if ($this->_useResumablePhotoUploader($targetFeed, $internalMetadata)) {
-                $this->_uploadResumablePhoto($targetFeed, $internalMetadata);
-            } else {
-                $internalMetadata->setPhotoUploadResponse(
-                    $this->_uploadPhotoInOnePiece($targetFeed, $internalMetadata)
-                );
-            }
+            $this->_uploadResumablePhoto($targetFeed, $internalMetadata);
+//            if ($this->_useResumablePhotoUploader($targetFeed, $internalMetadata)) {
+//                $this->_uploadResumablePhoto($targetFeed, $internalMetadata);
+//            } else {
+//                $internalMetadata->setPhotoUploadResponse(
+//                    $this->_uploadPhotoInOnePiece($targetFeed, $internalMetadata)
+//                );
+//            }
         } catch (InstagramException $e) {
             // Pass Instagram's error as is.
             throw $e;
@@ -206,9 +207,12 @@ class Internal extends RequestCollection
         /** @var array|null Array of usertagging instructions, in the format
          * [['position'=>[0.5,0.5], 'user_id'=>'123'], ...]. ONLY FOR TIMELINE PHOTOS! */
         $usertags = (isset($externalMetadata['usertags']) && $targetFeed == Constants::FEED_TIMELINE) ? $externalMetadata['usertags'] : null;
-        /** @var string|null Link to attach to the media. ONLY USED FOR STORY MEDIA,
+        /** @var string|null Link, that will be attached to swipe up section in story ONLY USED FOR STORY MEDIA,
          * AND YOU MUST HAVE A BUSINESS INSTAGRAM ACCOUNT TO POST A STORY LINK! */
         $link = (isset($externalMetadata['link']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['link'] : null;
+        /** @var string|null IGTV media ID that will be attached to swipe up section ONLY USED FOR STORY MEDIA,
+         * AND YOU MUST HAVE A BUSINESS INSTAGRAM ACCOUNT TO POST A STORY LINK! (not verified) */
+        $igtvItemID = (isset($externalMetadata['igtv_item_id']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['igtv_item_id'] : null;
         /** @var void Photo filter. THIS DOES NOTHING! All real filters are done in the mobile app. */
         // $filter = isset($externalMetadata['filter']) ? $externalMetadata['filter'] : null;
         $filter = null; // COMMENTED OUT SO USERS UNDERSTAND THEY CAN'T USE THIS!
@@ -224,16 +228,26 @@ class Internal extends RequestCollection
         $storyQuestion = (isset($externalMetadata['story_questions']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['story_questions'] : null;
         /** @var array Story countdown to use for the media. ONLY STORY MEDIA */
         $storyCountdown = (isset($externalMetadata['story_countdowns']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['story_countdowns'] : null;
+        /** @var array Story quiz to use for the media. ONLY STORY MEDIA */
+        $storyQuiz = (isset($externalMetadata['story_quizs']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['story_quizs'] : null;
+        /** @var array Chat sticker to use for the media. ONLY STORY MEDIA */
+        $chatSticker = (isset($externalMetadata['chat_sticker']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['chat_sticker'] : null;
         /** @var array Story fundraiser to use for the media. ONLY STORY MEDIA */
         $storyFundraisers = (isset($externalMetadata['story_fundraisers']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['story_fundraisers'] : null;
         /** @var array Attached media used to share media to story feed. ONLY STORY MEDIA! */
         $attachedMedia = (isset($externalMetadata['attached_media']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['attached_media'] : null;
         /** @var array Product Tags to use for the media. ONLY FOR TIMELINE PHOTOS! */
         $productTags = (isset($externalMetadata['product_tags']) && $targetFeed == Constants::FEED_TIMELINE) ? $externalMetadata['product_tags'] : null;
+        /** @var bool Share media to Facebook from Instagram app. Facebook account should be connected manually in the app before. ONLY FOR TIMELINE PHOTOS! */
+        $shareFacebook = (isset($externalMetadata['share_facebook'])) ? $externalMetadata['share_facebook'] : null;
 
         // Fix very bad external user-metadata values.
         if (!is_string($captionText)) {
             $captionText = '';
+        }
+
+        if ($shareFacebook !== null){
+            $request->addPost('share_to_facebook', '1');
         }
 
         // Critically important internal library-generated metadata parameters:
@@ -249,6 +263,7 @@ class Internal extends RequestCollection
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_uuid', $this->ig->uuid)
+            ->addPost('device_id', $this->ig->device_id)
             ->addPost('edits',
                 [
                     'crop_original_size'    => [(float) $photoWidth, (float) $photoHeight],
@@ -305,7 +320,11 @@ class Internal extends RequestCollection
                     ->addPost('upload_id', $uploadId);
 
                 if (is_string($link) && Utils::hasValidWebURLSyntax($link)) {
-                    $story_cta = '[{"links":[{"linkType": 1, "webUri":'.json_encode($link).', "androidClass": "", "package": "", "deeplinkUri": "", "callToActionTitle": "", "redirectUri": null, "leadGenFormId": "", "igUserId": "", "appInstallObjectiveInvalidationBehavior": null}]}]';
+                    $story_cta = '[{"links":[{"webUri":'.json_encode($link).'}]}]';
+                    $request->addPost('story_cta', $story_cta);
+                } elseif ($igtvItemID !== null) {
+                    Utils::throwIfInvalidIGTVMediaID($igtvItemID);
+                    $story_cta = '[{"links":[{"felix_video_id":'.json_encode($link).'}]}]';
                     $request->addPost('story_cta', $story_cta);
                 }
                 if ($hashtags !== null && $captionText !== '') {
@@ -352,6 +371,18 @@ class Internal extends RequestCollection
                     $request
                         ->addPost('story_countdowns', json_encode($storyCountdown))
                         ->addPost('story_sticker_ids', 'countdown_sticker_time');
+                }
+                if ($storyQuiz !== null) {
+                    Utils::throwIfInvalidStoryQuiz($storyQuiz);
+                    $request
+                        ->addPost('story_quizs', json_encode($storyQuiz))
+                        ->addPost('story_sticker_ids', 'quiz_story_sticker_default');
+                }
+                if ($chatSticker !== null) {
+                    Utils::throwIfInvalidChatSticker($chatSticker);
+                    $request
+                        ->addPost('story_sticker_ids', 'chat_sticker_bundle_id')
+                        ->addPost('story_chats', json_encode($chatSticker));
                 }
                 if ($storyFundraisers !== null) {
                     $request
@@ -438,17 +469,18 @@ class Internal extends RequestCollection
         }
 
         try {
-            if ($this->_useSegmentedVideoUploader($targetFeed, $internalMetadata)) {
-                $this->_uploadSegmentedVideo($targetFeed, $internalMetadata);
-            } elseif ($this->_useResumableVideoUploader($targetFeed, $internalMetadata)) {
-                $this->_uploadResumableVideo($targetFeed, $internalMetadata);
-            } else {
-                // Request parameters for uploading a new video.
-                $internalMetadata->setVideoUploadUrls($this->_requestVideoUploadURL($targetFeed, $internalMetadata));
-
-                // Attempt to upload the video data.
-                $internalMetadata->setVideoUploadResponse($this->_uploadVideoChunks($targetFeed, $internalMetadata));
-            }
+            $this->_uploadSegmentedVideo($targetFeed, $internalMetadata);
+            //            if ($this->_useSegmentedVideoUploader($targetFeed, $internalMetadata)) {
+            //                $this->_uploadSegmentedVideo($targetFeed, $internalMetadata);
+            //            } elseif ($this->_useResumableVideoUploader($targetFeed, $internalMetadata)) {
+            //                $this->_uploadResumableVideo($targetFeed, $internalMetadata);
+            //            } else {
+            //                 Request parameters for uploading a new video.
+            //                $internalMetadata->setVideoUploadUrls($this->_requestVideoUploadURL($targetFeed, $internalMetadata));
+            //
+            //                 Attempt to upload the video data.
+            //                $internalMetadata->setVideoUploadResponse($this->_uploadVideoChunks($targetFeed, $internalMetadata));
+            //            }
         } catch (InstagramException $e) {
             // Pass Instagram's error as is.
             throw $e;
@@ -553,12 +585,20 @@ class Internal extends RequestCollection
             if (isset($externalMetadata['thumbnail_timestamp'])) {
                 $options['thumbnailTimestamp'] = $externalMetadata['thumbnail_timestamp'];
             }
-            $videoThumbnail = new InstagramThumbnail(
-                $internalMetadata->getVideoDetails()->getFilename(),
-                $options
-            );
-            // Validate and upload the thumbnail.
-            $internalMetadata->setPhotoDetails($targetFeed, $videoThumbnail->getFile());
+            if ($targetFeed === Constants::FEED_TV && isset($externalMetadata['cover_photo'])) {
+                $videoThumbnail = new \InstagramAPI\Media\Photo\InstagramPhoto($externalMetadata['cover_photo'], $options);
+            } else {
+                $videoThumbnail = new InstagramThumbnail(
+                    $internalMetadata->getVideoDetails()->getFilename(),
+                    $options
+                );
+            }
+            // Validate and upload the thumbnail.	           
+            if (isset($externalMetadata['thumbnailFile']) && strlen($externalMetadata['thumbnailFile']) > 0 ){
+                $internalMetadata->setPhotoDetails($targetFeed, $externalMetadata['thumbnailFile']);
+            } else{
+                $internalMetadata->setPhotoDetails($targetFeed, $videoThumbnail->getFile());
+            }
             $this->uploadPhotoData($targetFeed, $internalMetadata);
         } catch (InstagramException $e) {
             // Pass Instagram's error as is.
@@ -655,9 +695,12 @@ class Internal extends RequestCollection
         /** @var array|null Array of story location sticker instructions. ONLY
          * USED FOR STORY MEDIA! */
         $locationSticker = (isset($externalMetadata['location_sticker']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['location_sticker'] : null;
-        /** @var string|null Link to attach to the media. ONLY USED FOR STORY MEDIA,
+        /** @var string|null Link, that will be attached to swipe up section in story ONLY USED FOR STORY MEDIA,
          * AND YOU MUST HAVE A BUSINESS INSTAGRAM ACCOUNT TO POST A STORY LINK! */
         $link = (isset($externalMetadata['link']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['link'] : null;
+        /** @var string|null IGTV media ID that will be attached to swipe up section ONLY USED FOR STORY MEDIA,
+         * AND YOU MUST HAVE A BUSINESS INSTAGRAM ACCOUNT TO POST A STORY LINK! (not verified) */
+        $igtvItemID = (isset($externalMetadata['igtv_item_id']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['igtv_item_id'] : null;
         /** @var array Hashtags to use for the media. ONLY STORY MEDIA! */
         $hashtags = (isset($externalMetadata['hashtags']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['hashtags'] : null;
         /** @var array Mentions to use for the media. ONLY STORY MEDIA! */
@@ -670,6 +713,10 @@ class Internal extends RequestCollection
         $storyQuestion = (isset($externalMetadata['story_questions']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['story_questions'] : null;
         /** @var array Story countdown to use for the media. ONLY STORY MEDIA */
         $storyCountdown = (isset($externalMetadata['story_countdowns']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['story_countdowns'] : null;
+        /** @var array Story quiz to use for the media. ONLY STORY MEDIA */
+        $storyQuiz = (isset($externalMetadata['story_quizs']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['story_quizs'] : null;
+        /** @var array Chat sticker to use for the media. ONLY STORY MEDIA */
+        $chatSticker = (isset($externalMetadata['chat_sticker']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['chat_sticker'] : null;
         /** @var array Story fundraiser to use for the media. ONLY STORY MEDIA */
         $storyFundraisers = (isset($externalMetadata['story_fundraisers']) && $targetFeed == Constants::FEED_STORY) ? $externalMetadata['story_fundraisers'] : null;
         /** @var array Attached media used to share media to story feed. ONLY STORY MEDIA! */
@@ -695,7 +742,7 @@ class Internal extends RequestCollection
             ->addPost('upload_id', $uploadId)
             ->addPost('poster_frame_index', 0)
             ->addPost('length', round($videoDetails->getDuration(), 1))
-            ->addPost('audio_muted', $videoDetails->getAudioCodec() === null)
+            ->addPost('audio_muted', false) // $videoDetails->getAudioCodec() === null
             ->addPost('filter_type', 0)
             ->addPost('source_type', 4)
             ->addPost('device',
@@ -712,7 +759,8 @@ class Internal extends RequestCollection
                 ])
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('_uuid', $this->ig->uuid)
-            ->addPost('_uid', $this->ig->account_id);
+            ->addPost('_uid', $this->ig->account_id)
+            ->addPost('device_id', $this->ig->device_id);
 
         switch ($targetFeed) {
             case Constants::FEED_TIMELINE:
@@ -737,7 +785,11 @@ class Internal extends RequestCollection
                     ->addPost('client_timestamp', time());
 
                 if (is_string($link) && Utils::hasValidWebURLSyntax($link)) {
-                    $story_cta = '[{"links":[{"linkType": 1, "webUri":'.json_encode($link).', "androidClass": "", "package": "", "deeplinkUri": "", "callToActionTitle": "", "redirectUri": null, "leadGenFormId": "", "igUserId": "", "appInstallObjectiveInvalidationBehavior": null}]}]';
+                    $story_cta = '[{"links":[{"webUri":'.json_encode($link).'}]}]';
+                    $request->addPost('story_cta', $story_cta);
+                } elseif ($igtvItemID !== null) {
+                    Utils::throwIfInvalidIGTVMediaID($igtvItemID);
+                    $story_cta = '[{"links":[{"felix_video_id":'.json_encode($link).'}]}]';
                     $request->addPost('story_cta', $story_cta);
                 }
                 if ($hashtags !== null && $captionText !== '') {
@@ -784,6 +836,18 @@ class Internal extends RequestCollection
                     $request
                         ->addPost('story_countdowns', json_encode($storyCountdown))
                         ->addPost('story_sticker_ids', 'countdown_sticker_time');
+                }
+                if ($storyQuiz !== null) {
+                    Utils::throwIfInvalidStoryQuiz($storyQuiz);
+                    $request
+                        ->addPost('story_quizs', json_encode($storyQuiz))
+                        ->addPost('story_sticker_ids', 'quiz_story_sticker_default');
+                }
+                if ($chatSticker !== null) {
+                    Utils::throwIfInvalidChatSticker($chatSticker);
+                    $request
+                        ->addPost('story_sticker_ids', 'chat_sticker_bundle_id')
+                        ->addPost('story_chats', json_encode($chatSticker));
                 }
                 if ($storyFundraisers !== null) {
                     $request
@@ -909,23 +973,31 @@ class Internal extends RequestCollection
             $itemInternalMetadata = $item['internalMetadata'];
             // Get all of the common, INTERNAL per-file metadata.
             $uploadId = $itemInternalMetadata->getUploadId();
+            /** @var int Width of the photo. */
+            $photoWidth = $itemInternalMetadata->getPhotoDetails()->getWidth();
+            /** @var int Height of the photo. */
+            $photoHeight = $itemInternalMetadata->getPhotoDetails()->getHeight();
 
             switch ($item['type']) {
             case 'photo':
                 // Build this item's configuration.
                 $photoConfig = [
-                    'date_time_original'  => $date,
-                    'scene_type'          => 1,
-                    'disable_comments'    => false,
-                    'upload_id'           => $uploadId,
-                    'source_type'         => 0,
-                    'scene_capture_type'  => 'standard',
-                    'date_time_digitized' => $date,
-                    'geotag_enabled'      => false,
-                    'camera_position'     => 'back',
-                    'edits'               => [
-                        'filter_strength' => 1,
-                        'filter_name'     => 'IGNormalFilter',
+                    'upload_id'     => $uploadId,
+                    'source_type'   => 4,
+                    'edits'         => [
+                        'crop_original_size'    => [(float) $photoWidth, (float) $photoHeight],
+                        'crop_zoom'             => 1.0,
+                        'crop_center'           => [0.0, -0.0],
+                    ],
+                    'device' => [
+                        'manufacturer'      => $this->ig->device->getManufacturer(),
+                        'model'             => $this->ig->device->getModel(),
+                        'android_version'   => $this->ig->device->getAndroidVersion(),
+                        'android_release'   => $this->ig->device->getAndroidRelease(),
+                    ],
+                    'extra' => [
+                        'source_width'  => $photoWidth,
+                        'source_height' => $photoHeight,
                     ],
                 ];
 
@@ -942,23 +1014,19 @@ class Internal extends RequestCollection
 
                 // Build this item's configuration.
                 $videoConfig = [
-                    'length'              => round($videoDetails->getDuration(), 1),
                     'date_time_original'  => $date,
-                    'scene_type'          => 1,
                     'poster_frame_index'  => 0,
-                    'trim_type'           => 0,
-                    'disable_comments'    => false,
                     'upload_id'           => $uploadId,
-                    'source_type'         => 'library',
-                    'geotag_enabled'      => false,
-                    'edits'               => [
+                    'source_type'         => '4',
+                    'device'              => [
+                        'manufacturer'      => $this->ig->device->getManufacturer(),
+                        'model'             => $this->ig->device->getModel(),
+                        'android_version'   => $this->ig->device->getAndroidVersion(),
+                        'android_release'   => $this->ig->device->getAndroidRelease(),
+                    ],
+                    'clips' => [
                         'length'          => round($videoDetails->getDuration(), 1),
-                        'cinema'          => 'unsupported',
-                        'original_length' => round($videoDetails->getDuration(), 1),
-                        'source_type'     => 'library',
-                        'start_time'      => 0,
-                        'camera_position' => 'unknown',
-                        'trim_type'       => 0,
+                        'source_type'     => '4',
                     ],
                 ];
 
@@ -974,11 +1042,19 @@ class Internal extends RequestCollection
 
         // Build the request...
         $request = $this->ig->request($endpoint)
+            ->addPost('timezone_offset', date('Z'))
             ->addPost('_csrftoken', $this->ig->client->getToken())
             ->addPost('_uid', $this->ig->account_id)
             ->addPost('_uuid', $this->ig->uuid)
             ->addPost('client_sidecar_id', $albumUploadId)
             ->addPost('caption', $captionText)
+            ->addPost('device',
+                [
+                    'manufacturer'      => $this->ig->device->getManufacturer(),
+                    'model'             => $this->ig->device->getModel(),
+                    'android_version'   => $this->ig->device->getAndroidVersion(),
+                    'android_release'   => $this->ig->device->getAndroidRelease(),
+                ])
             ->addPost('children_metadata', $childrenMetadata);
 
         if ($location instanceof Response\Model\Location) {
@@ -1426,9 +1502,30 @@ class Internal extends RequestCollection
     public function getQPCooldowns()
     {
         return $this->ig->request('qp/get_cooldowns/')
-            ->addParam('signed_body', Signatures::generateSignature(json_encode((object) []).'.{}'))
+            ->addParam('signed_body', Signatures::generateSignature(json_encode((object) [])).'.{}')
             ->addParam('ig_sig_key_version', Constants::SIG_KEY_VERSION)
             ->getResponse(new Response\QPCooldownsResponse());
+    }
+
+    /**
+     * Report a problem.
+     *
+     * Tells Instagram if you think they made a mistake.
+     *
+     * @param string $feedbackUrl Feedback URL.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GenericResponse
+     */
+    public function reportProblem(
+        $feedbackUrl)
+    {
+        return $this->ig->request($feedbackUrl)
+             ->addPost('_csrftoken', $this->ig->client->getToken())
+             ->addPost('_uid', $this->ig->account_id)
+             ->addPost('_uuid', $this->ig->uuid)
+             ->getResponse(new Response\GenericResponse());
     }
 
     public function storeClientPushPermissions()
@@ -1440,6 +1537,69 @@ class Internal extends RequestCollection
             ->addPost('device_id', $this->ig->device_id)
             ->addPost('_uuid', $this->ig->uuid)
             ->getResponse(new Response\GenericResponse());
+    }
+
+    /**
+     * Starts new user flow when registering with phone number.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GenericResponse
+     */
+    public function startNewUserFlow()
+    {
+        return $this->ig->request('consent/new_user_flow_begins/')
+            ->setSignedPost(false)
+            ->setNeedsAuth(false)
+            ->addPost('_csrftoken', $this->ig->client->getToken())
+            ->addPost('device_id', $this->ig->uuid)
+            ->getResponse(new Response\GenericResponse());
+    }
+
+    /**
+     * Send consent policy to Instagram.
+     *
+     * @param bool $screenKey Current screen key.
+     * @param int  $day       Day of the month of your bith date.
+     * @param int  $month     Month Number of the month of your birth date.
+     * @param int  $year      Year of your birth date.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\ConsentRequiredResponse
+     */
+    public function sendConsent(
+        $screenKey = null,
+        $day = null,
+        $month = null,
+        $year = null)
+    {
+        $request = $this->ig->request('consent/existing_user_flow/')
+             ->addPost('device_id', $this->ig->device_id)
+             ->addPost('_csrftoken', $this->ig->client->getToken())
+             ->addPost('_uid', $this->ig->account_id)
+             ->addPost('_uuid', $this->ig->uuid);
+
+        switch ($screenKey) {
+            case 'qp_intro':
+                $request->addPost('current_screen_key', 'qp_intro')
+                        ->addPost('updates', json_encode(['existing_user_intro_state' => '2']));
+                break;
+            case 'dob':
+                $request->addPost('current_screen_key', 'dob')
+                        ->addPost('day', $day)
+                        ->addPost('month', $month)
+                        ->addPost('year', $year);
+                break;
+            case 'tos':
+                $request->addPost('current_screen_key', 'tos')
+                        ->addPost('updates', json_encode(['tos_data_policy_consent_state' => '2']));
+                break;
+            default:
+                break;
+        }
+
+        return $request->getResponse(new Response\ConsentRequiredResponse());
     }
 
     /**
@@ -1521,8 +1681,8 @@ class Internal extends RequestCollection
             ->addPost('live_vods_skipped', [])
             ->addPost('nuxes', [])
             ->addPost('nuxes_skipped', [])
-//            ->addParam('reel', 1)
-//            ->addParam('live_vod', 0)
+            ->addParam('reel', 1)
+            ->addParam('live_vod', 0)
             ->getResponse(new Response\MediaSeenResponse());
     }
 
@@ -1588,7 +1748,7 @@ class Internal extends RequestCollection
             }
 
             $httpResponse = $result->getHttpResponse();
-            $delay = 1;
+            $delay = 5;
             switch ($httpResponse->getStatusCode()) {
                 case 200:
                     // Instagram uses "ok" status for this error, so we need to check it first:
@@ -1773,7 +1933,7 @@ class Internal extends RequestCollection
         $offsetTemplate = new Request($this->ig, $endpoint);
         $offsetTemplate
             ->setAddDefaultHeaders(false)
-            ->addHeader('X_FB_PHOTO_WATERFALL_ID', Signatures::generateUUID(true))
+            ->addHeader('X_FB_PHOTO_WATERFALL_ID', Signatures::generateUUID())
             ->addHeader('X-Instagram-Rupload-Params', json_encode($uploadParams));
 
         $uploadTemplate = clone $offsetTemplate;
@@ -2183,7 +2343,7 @@ class Internal extends RequestCollection
         $offsetTemplate = new Request($this->ig, $endpoint);
         $offsetTemplate
             ->setAddDefaultHeaders(false)
-            ->addHeader('X_FB_VIDEO_WATERFALL_ID', Signatures::generateUUID(true))
+            ->addHeader('X_FB_VIDEO_WATERFALL_ID', Signatures::generateUUID())
             ->addHeader('X-Instagram-Rupload-Params', json_encode($uploadParams));
 
         $uploadTemplate = clone $offsetTemplate;
@@ -2215,11 +2375,6 @@ class Internal extends RequestCollection
         $targetFeed,
         InternalMetadata $internalMetadata)
     {
-        // No segmentation for album video.
-        if ($targetFeed === Constants::FEED_TIMELINE_ALBUM) {
-            return false;
-        }
-
         // ffmpeg is required for video segmentation.
         try {
             FFmpeg::factory();
@@ -2230,6 +2385,7 @@ class Internal extends RequestCollection
         // There is no need to segment short videos.
         switch ($targetFeed) {
             case Constants::FEED_TIMELINE:
+            case Constants::FEED_TIMELINE_ALBUM:
                 $minDuration = (int) $this->ig->getExperimentParam(
                     'ig_android_video_segmented_upload_universe',
                     // NOTE: This typo is intentional. Instagram named it that way.
@@ -2570,6 +2726,7 @@ class Internal extends RequestCollection
     {
         switch ($targetFeed) {
             case Constants::FEED_TIMELINE:
+            case Constants::FEED_TIMELINE_ALBUM:
                 $duration = $this->ig->getExperimentParam(
                     'ig_android_video_segmented_upload_universe',
                     'target_segment_duration_feed',

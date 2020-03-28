@@ -80,7 +80,7 @@ use InstagramAPI\AutoPropertyMapper;
  * @method bool getIsBestie()
  * @method bool getIsBusiness()
  * @method bool getIsCallToActionEnabled()
- * @method bool getIsCallToActionEnabledBySurface()
+ * @method mixed getIsCallToActionEnabledBySurface()
  * @method bool getIsDirectappInstalled()
  * @method bool getIsEligibleToShowFbCrossSharingNux()
  * @method bool getIsFavorite()
@@ -362,7 +362,7 @@ use InstagramAPI\AutoPropertyMapper;
  * @method $this setIsBestie(bool $value)
  * @method $this setIsBusiness(bool $value)
  * @method $this setIsCallToActionEnabled(bool $value)
- * @method $this setIsCallToActionEnabledBySurface(bool $value)
+ * @method $this setIsCallToActionEnabledBySurface(mixed $value)
  * @method $this setIsDirectappInstalled(bool $value)
  * @method $this setIsEligibleToShowFbCrossSharingNux(bool $value)
  * @method $this setIsFavorite(bool $value)
@@ -693,7 +693,7 @@ class User extends AutoPropertyMapper
         'fb_page_call_to_action_ix_label_bundle' => '',
         'fb_page_call_to_action_ix_url'          => 'string',
         'fb_page_call_to_action_ix_partner'      => 'string',
-        'is_call_to_action_enabled_by_surface'   => 'bool',
+        'is_call_to_action_enabled_by_surface'   => '',
         'can_crosspost_without_fb_token'         => 'bool',
         'num_of_admined_pages'                   => 'int',
         'shoppable_posts_count'                  => 'int',

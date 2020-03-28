@@ -29,7 +29,7 @@ class VideoDetails extends MediaDetails
      *
      * @var int
      */
-    const MAX_WIDTH = 720;
+    const MAX_WIDTH = 1080;
 
     /** @var float */
     private $_duration;

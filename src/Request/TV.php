@@ -11,7 +11,57 @@ use InstagramAPI\Response;
 class TV extends RequestCollection
 {
     /**
+     * Get Instagram TV feed.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\TVGuideResponse
+     */
+    public function getTvFeed()
+    {
+        $response = $this->ig->request('igtv/browse_feed/')
+            ->addParam('prefetch', 1)
+            ->addParam('banner_token', $this->ig->settings->get('banner_token'))
+            ->getResponse(new Response\TVGuideResponse());
+
+        if ($response->getBannerToken() !== $this->ig->settings->get('banner_token')) {
+            $this->ig->settings->set('banner_token', $response->getBannerToken());
+        }
+
+        return $response;
+    }
+
+    /**
+     * Get non prefetched Instagram TV feed.
+     *
+     * @param string|null $maxId Next "maximum ID", used for pagination.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\TVGuideResponse
+     */
+    public function getNonPrefetchFeed(
+        $maxId = null)
+    {
+        $request = $this->ig->request('igtv/non_prefetch_browse_feed');
+
+        if ($maxId !== null) {
+            $request->addParam('max_id', $maxId);
+        }
+
+        $response = $request->getResponse(new Response\TVGuideResponse());
+
+        if ($response->getBannerToken() !== $this->ig->settings->get('banner_token')) {
+            $this->ig->settings->set('banner_token', $response->getBannerToken());
+        }
+
+        return $response;
+    }
+
+    /**
      * Get Instagram TV guide.
+     * 
+     * @deprecated This endpoint has been removed in favor of getTvFeed() and getNonPrefetchFeed().
      *
      * It provides a catalogue of popular and suggested channels.
      *
@@ -34,9 +84,9 @@ class TV extends RequestCollection
             ->addHeader('X-DEVICE-ID', $this->ig->uuid)
             ->addParam('prefetch', 1)
             ->addParam('phone_id', $this->ig->phone_id)
-            ->addParam('battery_level', '100')
-//            ->addParam('banner_token', 'OgYA')
-            ->addParam('is_charging', '1')
+            ->addPost('battery_level', $this->ig->getBatteryLevel())
+            ->addPost('is_charging', $this->ig->getIsDeviceCharging())
+            ->addParam('banner_token', $this->ig->settings->get('banner_token'))
             ->addParam('will_sound_on', '1');
 
         if (isset($options['is_charging'])) {
@@ -47,7 +97,33 @@ class TV extends RequestCollection
 
         $response = $request->getResponse(new Response\TVGuideResponse());
 
+        if ($response->getBannerToken() !== $this->ig->settings->get('banner_token')) {
+            $this->ig->settings->set('banner_token', $response->getBannerToken());
+        }
+
         return $response;
+    }
+
+    /**
+     * Get Instagram TV Feed.
+     *
+     * @param bool $prefetch (optional) Indicates if the request is called from prefetch.
+     *
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\TVGuideResponse
+     */
+    public function getBrowseFeed(
+        $prefetch = false)
+    {
+        $request = $this->ig->request('igtv/browse_feed')
+            ->addParam('prefetch', 1)
+            ->addParam('banner_token', $this->ig->settings->get('banner_token'));
+        if ($prefetch) {
+            $request->addHeader('X-IG-Prefetch-Request', 'foreground');
+        }
+
+        return $request->getResponse(new Response\TVGuideResponse());
     }
 
     /**
@@ -74,6 +150,7 @@ class TV extends RequestCollection
         }
 
         $request = $this->ig->request('igtv/channel/')
+            ->addHeader('X-DEVICE-ID', $this->ig->device_id)
             ->addPost('id', $id)
             ->addPost('_uuid', $this->ig->uuid)
             ->addPost('_uid', $this->ig->account_id)

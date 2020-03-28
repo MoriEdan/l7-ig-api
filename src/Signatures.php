@@ -58,9 +58,10 @@ class Signatures
         }
         unset($value); // Clear reference.
         // Reorder and convert data to JSON string.
-        $data = json_encode((object) Utils::reorderByHashCode($data));
+        $data = json_encode((object) Utils::reorderByHashCode($data), JSON_PRESERVE_ZERO_FRACTION);
         // Sign data.
-        $result['ig_sig_key_version'] = Constants::SIG_KEY_VERSION;
+        $keyVersion = Constants::SIG_KEY_VERSION;
+        $result['ig_sig_key_version'] = $keyVersion;
         $result['signed_body'] = self::generateSignature($data).'.'.$data;
         // Return value must be reordered.
         return Utils::reorderByHashCode($result);
@@ -68,8 +69,14 @@ class Signatures
 
     public static function generateDeviceId()
     {
+        // Instagram's internal security IDs which no device is allowed to use.
+        // NOTE: This list is from debugging their APK, which disallows these.
+        static $securityIds = ['9774d56d682e549c', '9d1d1f0dfa440886', 'fc067667235b8f19'];
+
         // This has 10 million possible hash subdivisions per clock second.
-        $megaRandomHash = md5(number_format(microtime(true), 7, '', ''));
+        do {
+            $megaRandomHash = md5(number_format(microtime(true), 7, '', ''));
+        } while (in_array($megaRandomHash, $securityIds, true));
 
         return 'android-'.substr($megaRandomHash, 16);
     }
@@ -91,6 +98,11 @@ class Signatures
         return (bool) preg_match('#^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$#D', $uuid);
     }
 
+    /**
+     * UUID
+     *
+     * @return string
+     */
     public static function generateUUID(
         $keepDashes = true)
     {

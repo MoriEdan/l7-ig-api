@@ -4,7 +4,6 @@ namespace InstagramAPI\Request;
 
 use InstagramAPI\Exception\RequestHeadersTooLargeException;
 use InstagramAPI\Response;
-use InstagramAPI\Signatures;
 use InstagramAPI\Utils;
 
 /**
@@ -235,6 +234,10 @@ class Hashtag extends RequestCollection
     /**
      * Get the feed for a hashtag.
      *
+     * @deprecated The feed endpoint has been removed in favor of the hashtag section API.
+     * This function is now just wrapping Hashtag::getSection() and will be removed shortly.
+     * Please use Hashtag::getSection().
+     *
      * @param string      $hashtag   The hashtag, not including the "#".
      * @param string      $rankToken The feed UUID. You must use the same value for all pages of the feed.
      * @param string|null $maxId     Next "maximum ID", used for pagination.
@@ -244,8 +247,7 @@ class Hashtag extends RequestCollection
      *
      * @return \InstagramAPI\Response\TagFeedResponse
      *
-     * @see Signatures::generateUUID() To create a UUID.
-     * @see examples/rankTokenUsage.php For an example.
+     * @see Hashtag::getSection() To see the function that will replace this one in the future.
      */
     public function getFeed(
         $hashtag,
@@ -254,14 +256,39 @@ class Hashtag extends RequestCollection
     {
         Utils::throwIfInvalidHashtag($hashtag);
         Utils::throwIfInvalidRankToken($rankToken);
-        $urlHashtag = urlencode($hashtag); // Necessary for non-English chars.
-        $hashtagFeed = $this->ig->request("feed/tag/{$urlHashtag}/")
-            ->addParam('rank_token', $rankToken);
-        if ($maxId !== null) {
-            $hashtagFeed->addParam('max_id', $maxId);
-        }
 
-        return $hashtagFeed->getResponse(new Response\TagFeedResponse());
+        return $this->getSection($hashtag, $rankToken, 'top', null, $maxId);
+    }
+
+    /**
+     * Get the feed for a hashtag via web API
+     *
+     * @param string      $hashtag   The hashtag, not including the "#".
+     * @param int         $next_page     Limit the userlist.
+     * @param string|null $end_cursor    Next "maximum ID", used for pagination.
+     *
+     * @throws \InvalidArgumentException
+     * @throws \InstagramAPI\Exception\InstagramException
+     *
+     * @return \InstagramAPI\Response\GraphqlResponse
+     */
+    public function getFeedGraph(
+        $hashtag,
+        $next_page = 12,
+        $end_cursor = null)
+    {
+        Utils::throwIfInvalidHashtag($hashtag);
+
+        return $request = $this->ig->request("graphql/query/")
+            ->setVersion(5)
+            ->setSignedPost(false)
+            ->addParam('query_hash', 'bd33792e9f52a56ae8fa0985521d141d')
+            ->addParam('variables', json_encode([
+                "tag_name" => $hashtag,
+                "first" => $next_page,
+                "after" => $end_cursor,
+            ]))
+            ->getResponse(new Response\GraphqlResponse());
     }
 
     /**
@@ -339,7 +366,7 @@ class Hashtag extends RequestCollection
      * @see Location::markStoryMediaSeen()
      */
     public function markStoryMediaSeen(
-        Response\TagFeedResponse $hashtagFeed,
+        Response\TagsStoryResponse $hashtagFeed,
         array $items)
     {
         // Extract the Hashtag Story-Tray ID from the user's hashtag response.
